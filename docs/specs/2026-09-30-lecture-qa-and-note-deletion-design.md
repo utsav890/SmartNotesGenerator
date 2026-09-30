@@ -24,14 +24,15 @@ Add a `LectureMessage` persistence model linked to a lecture with a cascading
 foreign key. Store each user question and assistant answer as a separate
 ordered row with a role, text, and creation timestamp. This keeps conversation
 history queryable and makes deletion explicit without embedding growing JSON
-in the lecture row.
+in the lecture row. Add a MySQL migration for this table.
 
 Add an endpoint to retrieve the ordered message history for a lecture and a
 question endpoint that validates the lecture and its transcript, obtains the
 latest saved note content, asks the configured LLM to answer strictly from
-those sources, then persists the user/assistant exchange. Do not persist a
-partial exchange when generation fails. Return actionable HTTP errors for a
-missing lecture/transcript/note and provider or persistence failures.
+those sources and the most recent 20 conversation messages, then persists the
+user/assistant exchange. Do not persist a partial exchange when generation
+fails. Return actionable HTTP errors for missing or empty source content and
+provider or persistence failures.
 
 Add a note-deletion endpoint scoped to a lecture. In one database transaction,
 delete all `Note` rows and Q&A messages for that lecture; do not delete the
@@ -77,8 +78,9 @@ Keep the library's existing empty and error states functional after deletion.
 - Keep provider secrets and prompt construction on the backend.
 - Scope all message and deletion queries by the requested lecture ID.
 - The application currently has no user authentication; this feature does not
-  introduce cross-user authorization. Per-user access control is a separate
-  concern and should be added consistently across the existing API.
+  introduce cross-user authorization. Bind the backend to `127.0.0.1` and
+  reject non-loopback client addresses. Do not expose it through a public
+  interface or reverse proxy.
 - Enforce a practical maximum question length and return a clear validation
   error for empty or oversized input.
 - Do not silently accept malformed model output or report success if the

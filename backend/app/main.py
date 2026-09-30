@@ -1,0 +1,1310 @@
+
+import json
+import logging
+import os
+import time
+from ipaddress import ip_address
+from pathlib import Path
+from uuid import uuid4
+
+from fastapi import (
+    FastAPI,
+    Depends,
+    Request,
+    UploadFile,
+    File,
+    HTTPException
+)
+from fastapi.responses import JSONResponse
+
+
+from pydantic import BaseModel, Field
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
+from app.flashcard import generate_flashcards
+from app.database import get_db
+from app.quiz import generate_quiz
+from app.transcription import transcribe_audio
+from app.notes_generator import answer_question, generate_notes
+from app.pipeline import process_transcript
+from app.rag import retrieve_context
+from app.models import (
+    Lecture,
+    Transcript,
+    Note,
+    LectureMessage,
+    Quiz,
+    QuizQuestion,
+)
+
+
+logger = logging.getLogger(__name__)
+
+# --------------------------------------------------
+# FASTAPI APPLICATION
+# --------------------------------------------------
+
+app = FastAPI(
+    title="Smart Notes Generator",
+    description="Generate and save structured lecture notes",
+    version="1.0.0"
+)
+
+@app.middleware("http")
+async def restrict_to_loopback(request: Request, call_next):
+    client_host = request.client.host if request.client else ""
+
+    try:
+        is_local_client = ip_address(client_host).is_loopback
+    except ValueError:
+        is_local_client = False
+
+    if not is_local_client:
+        return JSONResponse(
+            status_code=403,
+            content={"detail": "This API is available from this computer only."}
+        )
+
+    return await call_next(request)
+
+
+# --------------------------------------------------
+# CONFIGURATION
+# --------------------------------------------------
+
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+UPLOAD_DIR = BASE_DIR / "data"
+UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+
+ALLOWED_EXTENSIONS = {
+    ".mp3",
+    ".wav",
+    ".m4a",
+    ".ogg",
+    ".webm"
+}
+
+MAX_FILE_SIZE = 50 * 1024 * 1024
+
+
+# --------------------------------------------------
+# REQUEST MODELS
+# --------------------------------------------------
+
+class LectureRequest(BaseModel):
+    title: str
+
+
+class NotesRequest(BaseModel):
+    transcript: str
+
+
+class LectureQuestionRequest(BaseModel):
+    question: str = Field(min_length=1, max_length=4000)
+
+
+def get_or_create_default_user(db: Session):
+    existing_user = db.execute(
+        text("SELECT id FROM users ORDER BY id LIMIT 1")
+    ).scalar()
+
+    if existing_user is not None:
+        return existing_user
+
+    db.execute(
+        text(
+            "INSERT INTO users (full_name, email, password_hash) "
+            "VALUES (:full_name, :email, :password_hash)"
+        ),
+        {
+            "full_name": "System User",
+            "email": "system@smartnotes.local",
+            "password_hash": "system-user"
+        }
+    )
+    db.commit()
+
+    return db.execute(text("SELECT LAST_INSERT_ID()" )).scalar()
+
+
+# --------------------------------------------------
+# HOME ROUTE
+# --------------------------------------------------
+
+@app.get("/")
+def home():
+    return {
+        "message": "Smart Notes Generator API is running"
+    }
+
+
+# --------------------------------------------------
+# DATABASE CONNECTION TEST
+# --------------------------------------------------
+
+@app.get("/db-test")
+def test_database(
+    db: Session = Depends(get_db)
+):
+    database = db.execute(
+        text("SELECT DATABASE()")
+    ).scalar()
+
+    return {
+        "message": "MySQL connected successfully",
+        "database": database
+    }
+
+
+# --------------------------------------------------
+# CREATE LECTURE
+# --------------------------------------------------
+
+@app.post("/lectures")
+def create_lecture(
+    request: LectureRequest,
+    db: Session = Depends(get_db)
+):
+    if not request.title.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Lecture title cannot be empty"
+        )
+
+    user_id = get_or_create_default_user(db)
+
+    lecture = Lecture(
+        user_id=user_id,
+        title=request.title.strip(),
+        audio_path="",
+        audio_format="",
+        file_size=0,
+        status="uploaded"
+    )
+
+    try:
+        db.add(lecture)
+        db.commit()
+        db.refresh(lecture)
+
+        return {
+            "message": "Lecture created successfully",
+            "lecture_id": lecture.id,
+            "title": lecture.title
+        }
+
+    except Exception as error:
+        db.rollback()
+
+        print("Lecture creation error:", error)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to create lecture"
+        )
+
+
+# --------------------------------------------------
+# UPLOAD AUDIO
+# --------------------------------------------------
+
+@app.post("/upload-audio")
+async def upload_audio(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    if not file.filename:
+        raise HTTPException(
+            status_code=400,
+            detail="No file selected"
+        )
+
+    original_name = Path(file.filename).name
+    extension = Path(original_name).suffix.lower()
+
+    # Validate audio format
+    if extension not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail="Unsupported audio format"
+        )
+
+    # Read uploaded file
+    contents = await file.read()
+
+    if not contents:
+        raise HTTPException(
+            status_code=400,
+            detail="The uploaded file is empty"
+        )
+
+    if len(contents) > MAX_FILE_SIZE:
+        raise HTTPException(
+            status_code=413,
+            detail="File size must not exceed 50 MB"
+        )
+
+    # Generate unique filename
+    saved_filename = f"{uuid4().hex}{extension}"
+
+    file_path = UPLOAD_DIR / saved_filename
+
+    try:
+        # Save audio file
+        file_path.write_bytes(contents)
+
+        # Create lecture record in MySQL
+        user_id = get_or_create_default_user(db)
+
+        lecture = Lecture(
+            user_id=user_id,
+            title=Path(original_name).stem,
+            audio_path=str(file_path),
+            audio_format=extension.lstrip("."),
+            file_size=len(contents),
+            status="uploaded"
+        )
+
+        db.add(lecture)
+        db.commit()
+        db.refresh(lecture)
+
+        return {
+            "message": "Audio uploaded successfully",
+            "lecture_id": lecture.id,
+            "original_filename": original_name,
+            "saved_filename": saved_filename,
+            "file_size_bytes": len(contents),
+            "status": lecture.status
+        }
+
+    except Exception as error:
+        db.rollback()
+
+        # Remove uploaded file if saving to database fails
+        if file_path.exists():
+            file_path.unlink()
+
+        print("Upload error:", error)
+
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to upload and save lecture"
+        )
+
+    finally:
+        await file.close()
+
+
+# --------------------------------------------------
+# TRANSCRIBE AUDIO AND SAVE TRANSCRIPT
+# --------------------------------------------------
+
+@app.post("/transcribe/{filename}")
+def transcribe_lecture(
+    filename: str,
+    db: Session = Depends(get_db)
+):
+    request_started_at = time.perf_counter()
+
+    # Prevent directory traversal
+    safe_filename = Path(filename).name
+
+    if safe_filename != filename:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid filename"
+        )
+
+    file_path = UPLOAD_DIR / safe_filename
+
+    if not file_path.is_file():
+        raise HTTPException(
+            status_code=404,
+            detail="Audio file not found"
+        )
+
+    # Find lecture associated with audio
+    lecture = db.query(Lecture).filter(
+        Lecture.audio_path == str(file_path)
+    ).first()
+
+    if not lecture:
+        raise HTTPException(
+            status_code=404,
+            detail="Lecture record not found"
+        )
+
+    try:
+        # Run Whisper transcription
+        result = transcribe_audio(str(file_path))
+
+        transcript_text = result["transcript"]
+        language = result.get("language")
+
+        if not transcript_text.strip():
+            raise HTTPException(
+                status_code=422,
+                detail="No speech detected in audio"
+            )
+
+        # Check if transcript already exists
+        transcript_record = db.query(Transcript).filter(
+            Transcript.lecture_id == lecture.id
+        ).first()
+
+        if transcript_record:
+            transcript_record.transcript_text = transcript_text
+            setattr(transcript_record, "language", language)
+
+        else:
+            transcript_record = Transcript(
+                lecture_id=lecture.id,
+                transcript_text=transcript_text,
+                language=language
+            )
+
+            db.add(transcript_record)
+
+        setattr(lecture, "status", "transcribed")
+
+        db.commit()
+
+        logger.info(
+            "Transcription request completed for lecture_id=%s in %.2f seconds",
+            lecture.id,
+            time.perf_counter() - request_started_at
+        )
+
+        return {
+            "message": "Transcription completed and saved",
+            "lecture_id": lecture.id,
+            "language": language,
+            "transcript": transcript_text
+        }
+
+    except HTTPException:
+        raise
+
+    except Exception as error:
+        db.rollback()
+
+        logger.exception(
+            "Transcription request failed for lecture_id=%s after %.2f seconds: %s",
+            lecture.id,
+            time.perf_counter() - request_started_at,
+            error
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail="Transcription failed. Check backend terminal."
+        )
+
+
+# --------------------------------------------------
+# GENERATE NOTES FROM PASTED TRANSCRIPT
+# Does not save notes to MySQL
+# --------------------------------------------------
+
+@app.post("/generate-notes")
+def create_notes(
+    request: NotesRequest
+):
+    if not request.transcript.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="Transcript cannot be empty"
+        )
+
+    try:
+        notes = generate_notes(
+            request.transcript
+        )
+
+        return {
+            "message": "Notes generated successfully",
+            "notes": notes
+        }
+
+    except ValueError as error:
+        raise HTTPException(
+            status_code=400,
+            detail=str(error)
+        )
+
+    except Exception as error:
+        print("AI note generation error:", error)
+
+        raise HTTPException(
+            status_code=502,
+            detail="AI note generation failed. Check backend terminal."
+        )
+
+
+# --------------------------------------------------
+# GENERATE NOTES FROM SAVED TRANSCRIPT
+# AND SAVE NOTES TO MYSQL
+# --------------------------------------------------
+
+@app.post("/lectures/{lecture_id}/generate-notes")
+def create_and_save_notes(
+    lecture_id: int,
+    db: Session = Depends(get_db)
+):
+
+    # Find lecture
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id
+    ).first()
+
+    if not lecture:
+        raise HTTPException(
+            status_code=404,
+            detail="Lecture not found"
+        )
+
+    # Find saved transcript
+    transcript_record = db.query(Transcript).filter(
+        Transcript.lecture_id == lecture_id
+    ).first()
+
+    if not transcript_record:
+        raise HTTPException(
+            status_code=404,
+            detail="Transcript not found. Transcribe lecture first."
+        )
+
+    try:
+
+        # --------------------------------------------------
+        # P_119 PIPELINE
+        # --------------------------------------------------
+
+        result = process_transcript(
+            str(transcript_record.transcript_text),
+            lecture_id=lecture_id
+        )
+
+        generated_notes = result["notes"]
+
+        # Final P_119 output
+        generated = {
+            "title": lecture.title,
+            "summary": "",
+            "sections": [],
+            "key_points": [],
+            "glossary": [],
+            "revision_questions": [],
+            "pipeline": {
+                "segments": result["segments"],
+                "coverage": result["coverage"]
+            }
+        }
+
+        # Prevent duplicate glossary terms/questions
+        seen_glossary_terms = set()
+        seen_questions = set()
+
+        # --------------------------------------------------
+        # COMBINE NOTES FROM ALL SEGMENTS
+        # --------------------------------------------------
+
+        for item in generated_notes:
+
+            notes = item.get("notes", {})
+
+            if not isinstance(notes, dict):
+                continue
+
+            # Summary
+            if not generated["summary"]:
+                generated["summary"] = notes.get(
+                    "summary",
+                    ""
+                )
+
+            # Sections
+            sections = notes.get("sections", [])
+
+            if isinstance(sections, list):
+                generated["sections"].extend(sections)
+
+            # Key points
+            key_points = notes.get("key_points", [])
+
+            if isinstance(key_points, list):
+                generated["key_points"].extend(key_points)
+
+            # Glossary
+            glossary = notes.get("glossary", [])
+
+            if isinstance(glossary, list):
+
+                for glossary_item in glossary:
+
+                    if not isinstance(glossary_item, dict):
+                        continue
+
+                    term = str(
+                        glossary_item.get("term", "")
+                    ).strip()
+
+                    if not term:
+                        continue
+
+                    term_key = term.lower()
+
+                    if term_key not in seen_glossary_terms:
+                        generated["glossary"].append(
+                            glossary_item
+                        )
+
+                        seen_glossary_terms.add(
+                            term_key
+                        )
+
+            # Revision questions
+            questions = notes.get(
+                "revision_questions",
+                []
+            )
+
+            if isinstance(questions, list):
+
+                for question in questions:
+
+                    question = str(question).strip()
+
+                    if not question:
+                        continue
+
+                    question_key = question.lower()
+
+                    if question_key not in seen_questions:
+
+                        generated["revision_questions"].append(
+                            question
+                        )
+
+                        seen_questions.add(
+                            question_key
+                        )
+
+        # --------------------------------------------------
+        # SAVE TO MYSQL
+        # --------------------------------------------------
+
+        latest_note = db.query(Note).filter(
+            Note.lecture_id == lecture_id
+        ).order_by(
+            Note.version.desc()
+        ).first()
+
+        note = Note(
+            lecture_id=lecture_id,
+            title=generated["title"],
+            summary=generated["summary"],
+            content=generated,
+            version=(latest_note.version + 1)
+                if latest_note else 1
+        )
+
+        db.add(note)
+
+        setattr(lecture, "status", "completed")
+
+        db.commit()
+        db.refresh(note)
+
+        return {
+            "message": "Notes generated and saved successfully",
+            "lecture_id": lecture_id,
+            "note_id": note.id,
+            "notes": generated
+        }
+
+    except Exception as error:
+
+        db.rollback()
+
+        print("Note generation error:", error)
+
+        raise HTTPException(
+            status_code=502,
+            detail="Note generation or saving failed. Check backend terminal."
+        )
+# --------------------------------------------------
+# RETRIEVE SAVED NOTES
+# --------------------------------------------------
+
+@app.get("/lectures/{lecture_id}/notes")
+def get_lecture_notes(
+    lecture_id: int,
+    db: Session = Depends(get_db)
+):
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id
+    ).first()
+
+    if not lecture:
+        raise HTTPException(
+            status_code=404,
+            detail="Lecture not found"
+        )
+
+    notes = db.query(Note).filter(
+        Note.lecture_id == lecture_id
+    ).order_by(
+        Note.id.desc()
+    ).all()
+
+    return {
+        "lecture_id": lecture.id,
+        "lecture_title": lecture.title,
+        "notes": [
+            {
+                "id": note.id,
+                "title": note.title,
+                "summary": note.summary,
+                "content": note.content,
+                "version": note.version
+            }
+            for note in notes
+        ]
+    }
+
+
+# --------------------------------------------------
+# RETRIEVE ALL LECTURES
+# --------------------------------------------------
+
+@app.get("/lectures")
+def get_all_lectures(
+    db: Session = Depends(get_db)
+):
+    saved_lecture_exists = db.query(Note.id).filter(
+        Note.lecture_id == Lecture.id
+    ).exists()
+
+    lectures = db.query(Lecture).filter(
+        saved_lecture_exists
+    ).order_by(
+        Lecture.id.desc()
+    ).all()
+
+    return {
+        "lectures": [
+            {
+                "id": lecture.id,
+                "title": lecture.title,
+                "status": lecture.status,
+                "created_at": lecture.created_at
+            }
+            for lecture in lectures
+        ]
+    }
+
+
+# --------------------------------------------------
+# SAVED LECTURE Q&A
+# --------------------------------------------------
+
+@app.get("/lectures/{lecture_id}/questions")
+def get_lecture_questions(
+    lecture_id: int,
+    db: Session = Depends(get_db)
+):
+    lecture_exists = db.query(Lecture.id).filter(
+        Lecture.id == lecture_id
+    ).first()
+
+    if not lecture_exists:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+
+    messages = db.query(LectureMessage).filter(
+        LectureMessage.lecture_id == lecture_id
+    ).order_by(
+        LectureMessage.id.asc()
+    ).all()
+
+    return {
+        "lecture_id": lecture_id,
+        "messages": [
+            {
+                "id": message.id,
+                "role": message.role,
+                "content": message.content,
+                "created_at": message.created_at
+            }
+            for message in messages
+        ]
+    }
+
+
+@app.post("/lectures/{lecture_id}/questions")
+def ask_lecture_question(
+    lecture_id: int,
+    request: LectureQuestionRequest,
+    db: Session = Depends(get_db)
+):
+    # --------------------------------------------------
+    # FIND LECTURE
+    # --------------------------------------------------
+
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id
+    ).first()
+
+    if not lecture:
+        raise HTTPException(
+            status_code=404,
+            detail="Lecture not found"
+        )
+
+    # --------------------------------------------------
+    # FIND TRANSCRIPT
+    # --------------------------------------------------
+
+    transcript = db.query(Transcript).filter(
+        Transcript.lecture_id == lecture_id
+    ).first()
+
+    if not transcript:
+        raise HTTPException(
+            status_code=404,
+            detail="No saved transcript is available for this lecture."
+        )
+
+    transcript_text = str(
+        transcript.transcript_text or ""
+    ).strip()
+
+    if not transcript_text:
+        raise HTTPException(
+            status_code=422,
+            detail="The saved transcript is empty."
+        )
+
+    # --------------------------------------------------
+    # FIND LATEST NOTES
+    # --------------------------------------------------
+
+    latest_note = db.query(Note).filter(
+        Note.lecture_id == lecture_id
+    ).order_by(
+        Note.version.desc(),
+        Note.id.desc()
+    ).first()
+
+    if not latest_note:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Generate saved notes for this lecture "
+                "before asking questions."
+            )
+        )
+
+    # --------------------------------------------------
+    # VALIDATE QUESTION
+    # --------------------------------------------------
+
+    question = request.question.strip()
+
+    if not question:
+        raise HTTPException(
+            status_code=422,
+            detail="Enter a question about this lecture."
+        )
+
+    # --------------------------------------------------
+    # GET CONVERSATION HISTORY
+    # --------------------------------------------------
+
+    stored_history = db.query(
+        LectureMessage
+    ).filter(
+        LectureMessage.lecture_id == lecture_id
+    ).order_by(
+        LectureMessage.id.asc()
+    ).all()
+
+    history = [
+        {
+            "role": str(message.role),
+            "content": str(message.content)
+        }
+        for message in stored_history
+        if message.role in {"user", "assistant"}
+    ]
+
+    # --------------------------------------------------
+    # PREPARE SAVED NOTES
+    # --------------------------------------------------
+
+    note_content = (
+        latest_note.content.strip()
+        if isinstance(latest_note.content, str)
+        else json.dumps(
+            latest_note.content,
+            ensure_ascii=False
+        )
+    )
+
+    if not note_content or note_content == "null":
+        raise HTTPException(
+            status_code=422,
+            detail="The saved notes are empty."
+        )
+
+    try:
+
+        # --------------------------------------------------
+        # RAG RETRIEVAL
+        # --------------------------------------------------
+
+        retrieved_chunks = retrieve_context(
+            lecture_id=lecture_id,
+            query=question,
+            limit=5
+        )
+
+        # Convert retrieved chunks into LLM context
+        context = "\n\n".join(
+            item["text"]
+            for item in retrieved_chunks
+            if item.get("text")
+        )
+
+        # --------------------------------------------------
+        # FALLBACK
+        # --------------------------------------------------
+
+        # If Qdrant does not return anything,
+        # use the transcript as fallback context.
+        if not context.strip():
+            context = transcript_text
+
+        # --------------------------------------------------
+        # ASK QWEN
+        # --------------------------------------------------
+
+        result = answer_question(
+            question=question,
+            context=context,
+            notes_context=note_content,
+            history=history
+        )
+
+    except Exception as error:
+
+        logger.exception(
+            "Question generation failed for lecture %s",
+            lecture_id
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Could not generate an answer. Please try again."
+        ) from error
+
+    # --------------------------------------------------
+    # EXTRACT ANSWER
+    # --------------------------------------------------
+
+    answer_text = result.get(
+        "answer",
+        ""
+    )
+
+    sources = result.get(
+        "sources",
+        []
+    )
+
+    confidence = result.get(
+        "confidence",
+        "medium"
+    )
+
+    if not answer_text:
+        raise HTTPException(
+            status_code=502,
+            detail="The AI returned an empty answer."
+        )
+
+    # --------------------------------------------------
+    # SAVE QUESTION
+    # --------------------------------------------------
+
+    question_message = LectureMessage(
+        lecture_id=lecture_id,
+        role="user",
+        content=question
+    )
+
+    # --------------------------------------------------
+    # SAVE ANSWER
+    # --------------------------------------------------
+
+    answer_message = LectureMessage(
+        lecture_id=lecture_id,
+        role="assistant",
+        content=answer_text
+    )
+
+    try:
+
+        db.add_all([
+            question_message,
+            answer_message
+        ])
+
+        db.commit()
+
+        db.refresh(question_message)
+        db.refresh(answer_message)
+
+    except SQLAlchemyError as error:
+
+        db.rollback()
+
+        logger.exception(
+            "Could not save question history for lecture %s",
+            lecture_id
+        )
+
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "The answer was generated but "
+                "could not be saved."
+            )
+        ) from error
+
+    # --------------------------------------------------
+    # RESPONSE
+    # --------------------------------------------------
+
+    return {
+        "lecture_id": lecture_id,
+        "question": question,
+        "answer": answer_text,
+        "sources": sources,
+        "confidence": confidence,
+        "retrieved_chunks": [
+            {
+                "text": item.get("text", ""),
+                "score": item.get("score")
+            }
+            for item in retrieved_chunks
+        ],
+        "messages": [
+            {
+                "id": question_message.id,
+                "role": question_message.role,
+                "content": question_message.content,
+                "created_at": question_message.created_at
+            },
+            {
+                "id": answer_message.id,
+                "role": answer_message.role,
+                "content": answer_message.content,
+                "created_at": answer_message.created_at
+            }
+        ]
+    }
+    
+
+
+@app.delete("/lectures/{lecture_id}/notes")
+def delete_lecture_notes(
+    lecture_id: int,
+    db: Session = Depends(get_db)
+):
+    lecture_exists = db.query(Lecture.id).filter(
+        Lecture.id == lecture_id
+    ).first()
+
+    if not lecture_exists:
+        raise HTTPException(status_code=404, detail="Lecture not found")
+
+    try:
+        deleted_notes = db.query(Note).filter(
+            Note.lecture_id == lecture_id
+        ).delete(synchronize_session=False)
+        db.query(LectureMessage).filter(
+            LectureMessage.lecture_id == lecture_id
+        ).delete(synchronize_session=False)
+        db.commit()
+    except SQLAlchemyError as error:
+        db.rollback()
+        logger.exception("Could not delete notes for lecture %s", lecture_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Could not delete the saved notes. Please try again."
+        ) from error
+
+    return {
+        "message": "Saved notes and Q&A history deleted.",
+        "lecture_id": lecture_id,
+        "deleted_notes": deleted_notes
+    }
+
+
+from fastapi.middleware.cors import CORSMiddleware
+
+allowed_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in allowed_origins if origin.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+    
+)
+@app.post("/lectures/{lecture_id}/flashcards")
+def create_flashcards(
+    lecture_id: int,
+    db: Session = Depends(get_db)
+):
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id
+    ).first()
+
+    if not lecture:
+        raise HTTPException(
+            status_code=404,
+            detail="Lecture not found"
+        )
+
+    latest_note = db.query(Note).filter(
+        Note.lecture_id == lecture_id
+    ).order_by(
+        Note.version.desc(),
+        Note.id.desc()
+    ).first()
+
+    if not latest_note:
+        raise HTTPException(
+            status_code=404,
+            detail="Generate notes before creating flashcards"
+        )
+
+    try:
+        note_content = (
+            latest_note.content
+            if isinstance(latest_note.content, str)
+            else json.dumps(
+                latest_note.content,
+                ensure_ascii=False
+            )
+        )
+
+        generated = generate_flashcards(
+            note_content,
+            count=10
+        )
+
+        flashcards = generated.get(
+            "flashcards",
+            []
+        )
+
+        for card in flashcards:
+
+            db.execute(
+                text("""
+                    INSERT INTO flashcards
+                    (lecture_id, question, answer)
+                    VALUES
+                    (:lecture_id, :question, :answer)
+                """),
+                {
+                    "lecture_id": lecture_id,
+                    "question": card["question"],
+                    "answer": card["answer"]
+                }
+            )
+
+        db.commit()
+
+        return {
+            "lecture_id": lecture_id,
+            "flashcards": flashcards
+        }
+
+    except Exception as error:
+
+        db.rollback()
+
+        print(
+            "Flashcard generation error:",
+            error
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Could not generate flashcards"
+        )
+        
+@app.post("/lectures/{lecture_id}/quiz")
+def create_quiz(
+    lecture_id: int,
+    db: Session = Depends(get_db)
+):
+
+    lecture = db.query(Lecture).filter(
+        Lecture.id == lecture_id
+    ).first()
+
+    if not lecture:
+        raise HTTPException(
+            status_code=404,
+            detail="Lecture not found"
+        )
+
+    latest_note = db.query(Note).filter(
+        Note.lecture_id == lecture_id
+    ).order_by(
+        Note.version.desc(),
+        Note.id.desc()
+    ).first()
+
+    if not latest_note:
+        raise HTTPException(
+            status_code=404,
+            detail="Generate notes before creating a quiz"
+        )
+
+    try:
+
+        note_content = (
+            latest_note.content
+            if isinstance(latest_note.content, str)
+            else json.dumps(
+                latest_note.content,
+                ensure_ascii=False
+            )
+        )
+
+        generated = generate_quiz(
+            note_content,
+            count=10
+        )
+
+        questions = generated.get(
+            "questions",
+            []
+        )
+
+        quiz = Quiz(
+            lecture_id=lecture_id,
+            title="Lecture Quiz"
+        )
+
+        db.add(quiz)
+        db.flush()
+
+        for item in questions:
+
+            options = item.get(
+                "options",
+                {}
+            )
+
+            quiz_question = QuizQuestion(
+                quiz_id=quiz.id,
+                question=item.get(
+                    "question",
+                    ""
+                ),
+                option_a=options.get("A", ""),
+                option_b=options.get("B", ""),
+                option_c=options.get("C", ""),
+                option_d=options.get("D", ""),
+                correct_answer=item.get(
+                    "correct_answer",
+                    ""
+                ),
+                explanation=item.get(
+                    "explanation",
+                    ""
+                )
+            )
+
+            db.add(quiz_question)
+
+        db.commit()
+
+        return {
+            "quiz_id": quiz.id,
+            "lecture_id": lecture_id,
+            "title": quiz.title,
+            "questions": questions
+        }
+
+    except Exception:
+
+        db.rollback()
+
+        logger.exception(
+            "Quiz generation failed for lecture %s",
+            lecture_id
+        )
+
+        raise HTTPException(
+            status_code=502,
+            detail="Could not generate quiz"
+        )
+        
+@app.get("/lectures/{lecture_id}/quiz")
+def get_quiz(
+    lecture_id: int,
+    db: Session = Depends(get_db)
+):
+    quiz = db.query(Quiz).filter(
+        Quiz.lecture_id == lecture_id
+    ).order_by(
+        Quiz.id.desc()
+    ).first()
+
+    if not quiz:
+        raise HTTPException(
+            status_code=404,
+            detail="Quiz not found"
+        )
+
+    questions = db.query(QuizQuestion).filter(
+        QuizQuestion.quiz_id == quiz.id
+    ).order_by(
+        QuizQuestion.id.asc()
+    ).all()
+
+    return {
+        "quiz_id": quiz.id,
+        "lecture_id": lecture_id,
+        "title": quiz.title,
+        "questions": [
+            {
+                "id": question.id,
+                "question": question.question,
+                "options": {
+                    "A": question.option_a,
+                    "B": question.option_b,
+                    "C": question.option_c,
+                    "D": question.option_d
+                },
+                "correct_answer": question.correct_answer,
+                "explanation": question.explanation
+            }
+            for question in questions
+        ]
+    }
