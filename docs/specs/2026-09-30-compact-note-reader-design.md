@@ -22,6 +22,8 @@ Keep the reader inside the existing main content region. Align the lecture
 title and reader actions as one compact header, allowing the title to use
 available width while keeping the Ask a question action visually primary and
 Delete saved notes secondary. Reduce excess top and inter-section spacing.
+For the reader heading only, normalize filename underscores and whitespace for
+legibility without changing the stored lecture title or other data.
 
 Use the reading canvas more effectively on desktop while retaining comfortable
 line lengths for note paragraphs. Reduce card padding and gaps, strengthen the
