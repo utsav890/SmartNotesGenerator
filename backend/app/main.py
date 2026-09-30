@@ -51,22 +51,26 @@ app = FastAPI(
     version="1.0.0"
 )
 
-@app.middleware("http")
-async def restrict_to_loopback(request: Request, call_next):
-    client_host = request.client.host if request.client else ""
+if os.getenv("ENVIRONMENT", "development") == "development":
 
-    try:
-        is_local_client = ip_address(client_host).is_loopback
-    except ValueError:
-        is_local_client = False
+    @app.middleware("http")
+    async def restrict_to_loopback(request: Request, call_next):
+        client_host = request.client.host if request.client else ""
 
-    if not is_local_client:
-        return JSONResponse(
-            status_code=403,
-            content={"detail": "This API is available from this computer only."}
-        )
+        try:
+            is_local_client = ip_address(client_host).is_loopback
+        except ValueError:
+            is_local_client = False
 
-    return await call_next(request)
+        if not is_local_client:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "detail": "This API is available from this computer only."
+                }
+            )
+
+        return await call_next(request)
 
 
 # --------------------------------------------------
