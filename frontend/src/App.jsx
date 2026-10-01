@@ -30,9 +30,25 @@ import {
   CheckCircle2,
   Volume2,
   Wand2,
-  ArrowUpRight
+  ArrowUpRight,
+  Shield,
+  ShieldAlert,
+  LogOut
 } from "lucide-react";
 import "./App.css";
+import "./Auth.css";
+import "./Admin.css";
+
+import { useAuth } from "./context/AuthContext";
+import { useRouter } from "./context/RouterContext";
+import LoginPage from "./components/auth/LoginPage";
+import RegisterPage from "./components/auth/RegisterPage";
+import VerifyEmailPage from "./components/auth/VerifyEmailPage";
+import ForgotPasswordPage from "./components/auth/ForgotPasswordPage";
+import ResetPasswordPage from "./components/auth/ResetPasswordPage";
+import SecurityPage from "./components/auth/SecurityPage";
+import AdminPanel from "./components/admin/AdminPanel";
+import UserProfileMenu from "./components/auth/UserProfileMenu";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
@@ -67,10 +83,27 @@ Finally, the grand finale of energy production is Oxidative Phosphorylation alon
 
 // Safely read JSON responses from FastAPI
 async function apiRequest(url, options = {}) {
-  const response = await fetch(`${API_BASE_URL}${url}`, options);
+  const token = localStorage.getItem("smartnotes_token");
+  const headers = {
+    ...(options.headers || {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {})
+  };
+
+  const response = await fetch(`${API_BASE_URL}${url}`, {
+    ...options,
+    headers,
+    credentials: "include"
+  });
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
+    if (response.status === 401 && !url.includes("/api/auth/")) {
+      localStorage.removeItem("smartnotes_token");
+      const currentPath = window.location.pathname;
+      if (currentPath !== "/login") {
+        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+      }
+    }
     throw new Error(
       data.detail ||
         data.message ||
@@ -244,18 +277,90 @@ function NotesArticle({ notes, headingLevel = 3, showTitle = true }) {
 }
 
 function App() {
+  const { user, token, isAuthenticated, isLoading, isAdmin, logout } = useAuth();
+  const { pathname, searchParams, params, navigate } = useRouter();
+
   // Theme state
   const [theme, setTheme] = useState(() => {
     return localStorage.getItem("noteflow_theme") || "dark";
   });
 
   // Navigation & Workspace State
-  const [view, setView] = useState("dashboard"); // "dashboard" | "my-notes" | "note-reader" | "quiz"
+  const [view, setView] = useState("dashboard"); // "dashboard" | "my-notes" | "note-reader" | "quiz" | "security"
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [inputTab, setInputTab] = useState("audio"); // "audio" | "transcript"
   const [isDragging, setIsDragging] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [copied, setCopied] = useState(false);
+
+  // Synchronize route and enforce authenticated protection
+  useEffect(() => {
+    if (isLoading) return;
+
+    const publicAuthRoutes = [
+      "/login",
+      "/register",
+      "/verify-email",
+      "/forgot-password",
+      "/reset-password"
+    ];
+
+    const isPublicAuthRoute = publicAuthRoutes.includes(pathname);
+
+    if (!isAuthenticated) {
+      if (!isPublicAuthRoute) {
+        const fullCurrentPath = pathname + (window.location.search || "");
+        navigate(`/login?redirect=${encodeURIComponent(fullCurrentPath)}`, { replace: true });
+      }
+    } else {
+      if (pathname === "/login" || pathname === "/register") {
+        const target = searchParams.get("redirect") || "/dashboard";
+        navigate(target, { replace: true });
+      } else if (pathname === "/settings" || pathname === "/settings/security") {
+        setView("security");
+      } else if (pathname === "/admin") {
+        if (!isAdmin) {
+          navigate("/dashboard", { replace: true });
+        } else {
+          setView("admin");
+        }
+      } else if (pathname === "/lectures" || pathname === "/notes") {
+        setView("my-notes");
+      } else if (pathname.startsWith("/lecture/")) {
+        setView("note-reader");
+      } else if (pathname === "/" || pathname === "/dashboard") {
+        setView("dashboard");
+      }
+    }
+  }, [pathname, isAuthenticated, isLoading, searchParams, navigate]);
+
+  // Load library or deep-linked lecture when routing directly
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+
+    if (pathname === "/lectures" || pathname === "/notes") {
+      apiRequest("/lectures")
+        .then((result) => {
+          if (Array.isArray(result?.lectures)) {
+            setLectures(result.lectures);
+          }
+        })
+        .catch(() => {});
+    } else if (pathname.startsWith("/lecture/")) {
+      const lectureId = parseInt(pathname.split("/lecture/")[1], 10);
+      if (lectureId && (!selectedLecture || selectedLecture.id !== lectureId)) {
+        apiRequest(`/lectures/${lectureId}`)
+          .then((lectureData) => {
+            if (lectureData && lectureData.id) {
+              openSavedNote(lectureData);
+            }
+          })
+          .catch((err) => {
+            setNotesError(err.message || "Failed to load lecture");
+          });
+      }
+    }
+  }, [pathname, isAuthenticated, isLoading]);
 
   // Form Inputs & Processing
   const [file, setFile] = useState(null);
@@ -461,6 +566,9 @@ function App() {
   const openMyNotes = async () => {
     if (loading || notesLoading) return;
 
+    if (pathname !== "/lectures") {
+      navigate("/lectures");
+    }
     setView("my-notes");
     setMobileMenuOpen(false);
     setNotesError("");
@@ -482,6 +590,9 @@ function App() {
   const openSavedNote = async (lecture) => {
     if (notesLoading) return;
 
+    if (pathname !== `/lecture/${lecture.id}`) {
+      navigate(`/lecture/${lecture.id}`);
+    }
     setSelectedLecture(lecture);
     setNotesError("");
     setHistoryError("");
@@ -802,6 +913,9 @@ function App() {
   const resetWorkspace = () => {
     if (loading) return;
 
+    if (pathname !== "/dashboard") {
+      navigate("/dashboard");
+    }
     setFile(null);
     setTranscript("");
     setNotes("");
@@ -865,6 +979,33 @@ function App() {
     (l.title || "Untitled lecture").toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  // 1. Loading screen
+  if (isLoading) {
+    return (
+      <div className="auth-loading-screen" role="status">
+        <div className="auth-loading-spinner" />
+        <p>Loading SmartNotes AI workspace...</p>
+      </div>
+    );
+  }
+
+  // 2. Unauthenticated or public auth pages
+  if (!isAuthenticated || ["/login", "/register", "/verify-email", "/forgot-password", "/reset-password"].includes(pathname)) {
+    if (pathname === "/register") {
+      return <RegisterPage />;
+    }
+    if (pathname === "/verify-email") {
+      return <VerifyEmailPage />;
+    }
+    if (pathname === "/forgot-password") {
+      return <ForgotPasswordPage />;
+    }
+    if (pathname === "/reset-password") {
+      return <ResetPasswordPage />;
+    }
+    return <LoginPage />;
+  }
+
   return (
     <div className="app">
       {/* Mobile Drawer Backdrop */}
@@ -883,7 +1024,7 @@ function App() {
             <BookOpen size={22} aria-hidden="true" />
           </div>
           <div>
-            <h2>NoteFlow</h2>
+            <h2>SmartNotes</h2>
           </div>
           <span className="brand-badge">AI</span>
         </div>
@@ -906,6 +1047,7 @@ function App() {
             aria-current={view === "dashboard" ? "page" : undefined}
             onClick={() => {
               setView("dashboard");
+              navigate("/dashboard");
               setMobileMenuOpen(false);
             }}
           >
@@ -917,7 +1059,7 @@ function App() {
             type="button"
             className={`nav-item${view === "my-notes" || view === "note-reader" || view === "quiz" ? " active" : ""}`}
             aria-label="Open saved notes library"
-            aria-current={view !== "dashboard" ? "page" : undefined}
+            aria-current={view !== "dashboard" && view !== "security" ? "page" : undefined}
             onClick={openMyNotes}
           >
             <FileText size={18} aria-hidden="true" />
@@ -926,6 +1068,42 @@ function App() {
               <span className="nav-item-badge">{lectures.length}</span>
             )}
           </button>
+
+          <button
+            type="button"
+            className={`nav-item${view === "security" ? " active" : ""}`}
+            aria-label="Account security and sessions"
+            aria-current={view === "security" ? "page" : undefined}
+            onClick={() => {
+              setView("security");
+              navigate("/settings/security");
+              setMobileMenuOpen(false);
+            }}
+          >
+            <Shield size={18} aria-hidden="true" />
+            Security &amp; Account
+          </button>
+
+          {isAdmin && (
+            <button
+              type="button"
+              className={`nav-item${view === "admin" ? " active" : ""}`}
+              aria-label="Admin command center"
+              aria-current={view === "admin" ? "page" : undefined}
+              style={{ color: "#c084fc" }}
+              onClick={() => {
+                setView("admin");
+                navigate("/admin");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <ShieldAlert size={18} aria-hidden="true" color="#c084fc" />
+              Admin Panel
+              <span className="brand-badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#c084fc", marginLeft: "auto", fontSize: "0.65rem", padding: "0.15rem 0.4rem" }}>
+                ADMIN
+              </span>
+            </button>
+          )}
         </nav>
 
         <div className="sidebar-footer">
@@ -945,12 +1123,59 @@ function App() {
             </span>
           </button>
 
-          <div className="profile">
-            <div className="avatar">U</div>
-            <div className="profile-info">
-              <strong>Student Workspace</strong>
-              <p>Whisper · Groq · FastAPI</p>
+          <div className="profile-wrapper" style={{ display: "flex", alignItems: "center", width: "100%", gap: "6px" }}>
+            <div
+              className="profile"
+              onClick={() => {
+                setView("security");
+                navigate("/settings/security");
+              }}
+              style={{ cursor: "pointer", flex: 1, minWidth: 0 }}
+              title="Open Security & Account settings"
+            >
+              <div className="avatar">
+                {(user?.full_name || user?.name || user?.email || "U").charAt(0).toUpperCase()}
+              </div>
+              <div className="profile-info">
+                <strong>{user?.full_name || user?.name || "Student User"}</strong>
+                <p>{user?.email || "Protected Account"}</p>
+              </div>
             </div>
+            <button
+              type="button"
+              className="sidebar-logout-btn"
+              onClick={async (e) => {
+                e.stopPropagation();
+                await logout();
+              }}
+              title="Sign out of account"
+              aria-label="Sign out"
+              style={{
+                background: "rgba(255, 255, 255, 0.04)",
+                border: "1px solid rgba(255, 255, 255, 0.08)",
+                color: "#94a3b8",
+                padding: "8px",
+                borderRadius: "8px",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+                transition: "all 150ms ease"
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = "#ef4444";
+                e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.35)";
+                e.currentTarget.style.background = "rgba(239, 68, 68, 0.12)";
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = "#94a3b8";
+                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
+                e.currentTarget.style.background = "rgba(255, 255, 255, 0.04)";
+              }}
+            >
+              <LogOut size={16} />
+            </button>
           </div>
         </div>
       </aside>
@@ -979,12 +1204,16 @@ function App() {
                   ? "My Notes"
                   : view === "quiz"
                   ? "Lecture Quiz"
+                  : view === "security"
+                  ? "Security & Account"
+                  : view === "admin"
+                  ? "Admin Command Center"
                   : "Note Reader"}
               </span>
             </span>
           </div>
 
-          <div className="topbar-right">
+          <div className="topbar-right" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <span
               className={`status-badge${loading ? " is-loading" : ""}`}
               role="status"
@@ -995,6 +1224,8 @@ function App() {
                 ? status || "Processing lecture with AI…"
                 : "Ready for a new lecture"}
             </span>
+
+            <UserProfileMenu />
           </div>
         </header>
 
@@ -1977,6 +2208,16 @@ function App() {
               )}
             </section>
           )}
+
+          {/* ================================================================
+              VIEW 5: SECURITY & ACCOUNT
+              ================================================================ */}
+          {view === "security" && <SecurityPage />}
+
+          {/* ================================================================
+              VIEW 6: ADMIN COMMAND CENTER (Strictly for authenticated Admins)
+              ================================================================ */}
+          {view === "admin" && isAdmin && <AdminPanel />}
         </div>
       </main>
 

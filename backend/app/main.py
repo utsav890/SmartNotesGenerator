@@ -13,9 +13,11 @@ from fastapi import (
     Request,
     UploadFile,
     File,
-    HTTPException
+    HTTPException,
+    status
 )
 from fastapi.responses import JSONResponse
+from fastapi.middleware.cors import CORSMiddleware
 
 
 from pydantic import BaseModel, Field
@@ -30,6 +32,7 @@ from app.notes_generator import answer_question, generate_notes
 from app.pipeline import process_transcript
 from app.rag import retrieve_context
 from app.models import (
+    User,
     Lecture,
     Transcript,
     Note,
@@ -37,6 +40,8 @@ from app.models import (
     Quiz,
     QuizQuestion,
 )
+from app.auth import router as auth_router, get_current_user, get_current_user_optional
+from app.admin import router as admin_router
 
 
 logger = logging.getLogger(__name__)
@@ -51,16 +56,41 @@ app = FastAPI(
     version="1.0.0"
 )
 
+# --------------------------------------------------
+# CORS CONFIGURATION
+# --------------------------------------------------
+allowed_origins = os.getenv(
+    "ALLOWED_ORIGINS",
+    "http://localhost:5173,http://127.0.0.1:5173,http://localhost:5174,http://127.0.0.1:5174,http://localhost:3000"
+).split(",")
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[origin.strip() for origin in allowed_origins if origin.strip()],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# --------------------------------------------------
+# INCLUDE AUTHENTICATION & ADMIN ROUTERS
+# --------------------------------------------------
+app.include_router(auth_router)
+app.include_router(admin_router)
+
 if os.getenv("ENVIRONMENT", "development") == "development":
 
     @app.middleware("http")
     async def restrict_to_loopback(request: Request, call_next):
         client_host = request.client.host if request.client else ""
 
-        try:
-            is_local_client = ip_address(client_host).is_loopback
-        except ValueError:
-            is_local_client = False
+        if client_host in ("testclient", "localhost", "127.0.0.1", "::1"):
+            is_local_client = True
+        else:
+            try:
+                is_local_client = ip_address(client_host).is_loopback
+            except ValueError:
+                is_local_client = False
 
         if not is_local_client:
             return JSONResponse(
@@ -133,6 +163,22 @@ def get_or_create_default_user(db: Session):
     return db.execute(text("SELECT LAST_INSERT_ID()" )).scalar()
 
 
+def get_user_lecture(lecture_id: int, user: User, db: Session) -> Lecture:
+    """Validate that lecture exists and belongs to the authenticated user."""
+    lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
+    if not lecture:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Lecture not found"
+        )
+    if lecture.user_id != user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this lecture."
+        )
+    return lecture
+
+
 # --------------------------------------------------
 # HOME ROUTE
 # --------------------------------------------------
@@ -169,6 +215,7 @@ def test_database(
 @app.post("/lectures")
 def create_lecture(
     request: LectureRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     if not request.title.strip():
@@ -177,10 +224,8 @@ def create_lecture(
             detail="Lecture title cannot be empty"
         )
 
-    user_id = get_or_create_default_user(db)
-
     lecture = Lecture(
-        user_id=user_id,
+        user_id=current_user.id,
         title=request.title.strip(),
         audio_path="",
         audio_format="",
@@ -217,6 +262,7 @@ def create_lecture(
 @app.post("/upload-audio")
 async def upload_audio(
     file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     if not file.filename:
@@ -259,11 +305,9 @@ async def upload_audio(
         # Save audio file
         file_path.write_bytes(contents)
 
-        # Create lecture record in MySQL
-        user_id = get_or_create_default_user(db)
-
+        # Create lecture record in MySQL for authenticated user
         lecture = Lecture(
-            user_id=user_id,
+            user_id=current_user.id,
             title=Path(original_name).stem,
             audio_path=str(file_path),
             audio_format=extension.lstrip("."),
@@ -309,6 +353,7 @@ async def upload_audio(
 @app.post("/transcribe/{filename}")
 def transcribe_lecture(
     filename: str,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     request_started_at = time.perf_counter()
@@ -339,6 +384,12 @@ def transcribe_lecture(
         raise HTTPException(
             status_code=404,
             detail="Lecture record not found"
+        )
+
+    if lecture.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="You do not have permission to access this lecture."
         )
 
     try:
@@ -456,19 +507,12 @@ def create_notes(
 @app.post("/lectures/{lecture_id}/generate-notes")
 def create_and_save_notes(
     lecture_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
 
-    # Find lecture
-    lecture = db.query(Lecture).filter(
-        Lecture.id == lecture_id
-    ).first()
-
-    if not lecture:
-        raise HTTPException(
-            status_code=404,
-            detail="Lecture not found"
-        )
+    # Find and verify lecture ownership
+    lecture = get_user_lecture(lecture_id, current_user, db)
 
     # Find saved transcript
     transcript_record = db.query(Transcript).filter(
@@ -647,17 +691,10 @@ def create_and_save_notes(
 @app.get("/lectures/{lecture_id}/notes")
 def get_lecture_notes(
     lecture_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    lecture = db.query(Lecture).filter(
-        Lecture.id == lecture_id
-    ).first()
-
-    if not lecture:
-        raise HTTPException(
-            status_code=404,
-            detail="Lecture not found"
-        )
+    lecture = get_user_lecture(lecture_id, current_user, db)
 
     notes = db.query(Note).filter(
         Note.lecture_id == lecture_id
@@ -682,11 +719,12 @@ def get_lecture_notes(
 
 
 # --------------------------------------------------
-# RETRIEVE ALL LECTURES
+# RETRIEVE ALL LECTURES (USER-SCOPED)
 # --------------------------------------------------
 
 @app.get("/lectures")
 def get_all_lectures(
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     saved_lecture_exists = db.query(Note.id).filter(
@@ -694,6 +732,7 @@ def get_all_lectures(
     ).exists()
 
     lectures = db.query(Lecture).filter(
+        Lecture.user_id == current_user.id,
         saved_lecture_exists
     ).order_by(
         Lecture.id.desc()
@@ -713,20 +752,38 @@ def get_all_lectures(
 
 
 # --------------------------------------------------
+# RETRIEVE SINGLE LECTURE (WITH OWNERSHIP CHECK)
+# --------------------------------------------------
+
+@app.get("/lectures/{lecture_id}")
+@app.get("/api/lectures/{lecture_id}")
+def get_lecture_detail(
+    lecture_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    lecture = get_user_lecture(lecture_id, current_user, db)
+    return {
+        "id": lecture.id,
+        "title": lecture.title,
+        "status": lecture.status,
+        "created_at": lecture.created_at,
+        "audio_format": lecture.audio_format,
+        "file_size": lecture.file_size
+    }
+
+
+# --------------------------------------------------
 # SAVED LECTURE Q&A
 # --------------------------------------------------
 
 @app.get("/lectures/{lecture_id}/questions")
 def get_lecture_questions(
     lecture_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    lecture_exists = db.query(Lecture.id).filter(
-        Lecture.id == lecture_id
-    ).first()
-
-    if not lecture_exists:
-        raise HTTPException(status_code=404, detail="Lecture not found")
+    lecture = get_user_lecture(lecture_id, current_user, db)
 
     messages = db.query(LectureMessage).filter(
         LectureMessage.lecture_id == lecture_id
@@ -752,21 +809,14 @@ def get_lecture_questions(
 def ask_lecture_question(
     lecture_id: int,
     request: LectureQuestionRequest,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # --------------------------------------------------
-    # FIND LECTURE
+    # FIND LECTURE & VERIFY OWNERSHIP
     # --------------------------------------------------
 
-    lecture = db.query(Lecture).filter(
-        Lecture.id == lecture_id
-    ).first()
-
-    if not lecture:
-        raise HTTPException(
-            status_code=404,
-            detail="Lecture not found"
-        )
+    lecture = get_user_lecture(lecture_id, current_user, db)
 
     # --------------------------------------------------
     # FIND TRANSCRIPT
@@ -1027,14 +1077,10 @@ def ask_lecture_question(
 @app.delete("/lectures/{lecture_id}/notes")
 def delete_lecture_notes(
     lecture_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    lecture_exists = db.query(Lecture.id).filter(
-        Lecture.id == lecture_id
-    ).first()
-
-    if not lecture_exists:
-        raise HTTPException(status_code=404, detail="Lecture not found")
+    lecture = get_user_lecture(lecture_id, current_user, db)
 
     try:
         deleted_notes = db.query(Note).filter(
@@ -1059,35 +1105,13 @@ def delete_lecture_notes(
     }
 
 
-from fastapi.middleware.cors import CORSMiddleware
-
-allowed_origins = os.getenv(
-    "ALLOWED_ORIGINS",
-    "http://localhost:5174,http://127.0.0.1:5174,http://localhost:5173,http://127.0.0.1:5173,http://localhost:3000"
-).split(",")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[origin.strip() for origin in allowed_origins if origin.strip()],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-    
-)
 @app.post("/lectures/{lecture_id}/flashcards")
 def create_flashcards(
     lecture_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    lecture = db.query(Lecture).filter(
-        Lecture.id == lecture_id
-    ).first()
-
-    if not lecture:
-        raise HTTPException(
-            status_code=404,
-            detail="Lecture not found"
-        )
+    lecture = get_user_lecture(lecture_id, current_user, db)
 
     latest_note = db.query(Note).filter(
         Note.lecture_id == lecture_id
@@ -1162,18 +1186,11 @@ def create_flashcards(
 @app.post("/lectures/{lecture_id}/quiz")
 def create_quiz(
     lecture_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
 
-    lecture = db.query(Lecture).filter(
-        Lecture.id == lecture_id
-    ).first()
-
-    if not lecture:
-        raise HTTPException(
-            status_code=404,
-            detail="Lecture not found"
-        )
+    lecture = get_user_lecture(lecture_id, current_user, db)
 
     latest_note = db.query(Note).filter(
         Note.lecture_id == lecture_id
@@ -1272,8 +1289,10 @@ def create_quiz(
 @app.get("/lectures/{lecture_id}/quiz")
 def get_quiz(
     lecture_id: int,
+    current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    lecture = get_user_lecture(lecture_id, current_user, db)
     quiz = db.query(Quiz).filter(
         Quiz.lecture_id == lecture_id
     ).order_by(

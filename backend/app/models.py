@@ -4,6 +4,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    Boolean,
     ForeignKey,
     TIMESTAMP,
     DateTime,
@@ -17,11 +18,156 @@ from sqlalchemy.orm import relationship
 from app.database import Base
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    full_name = Column(String(100), nullable=False)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    password_hash = Column(Text, nullable=False)
+    is_verified = Column(Boolean, nullable=False, server_default=text("0"))
+    created_at = Column(
+        TIMESTAMP,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at = Column(
+        TIMESTAMP,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=text("CURRENT_TIMESTAMP")
+    )
+    role = Column(String(20), nullable=False, server_default=text("'user'"))
+    is_active = Column(Boolean, nullable=False, server_default=text("1"))
+    last_login = Column(TIMESTAMP, nullable=True)
+
+    lectures = relationship(
+        "Lecture",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    sessions = relationship(
+        "UserSession",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    verification_tokens = relationship(
+        "EmailVerificationToken",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    reset_tokens = relationship(
+        "PasswordResetToken",
+        back_populates="user",
+        cascade="all, delete-orphan"
+    )
+    login_activities = relationship(
+        "LoginActivity",
+        back_populates="user"
+    )
+
+
+class UserSession(Base):
+    __tablename__ = "user_sessions"
+
+    id = Column(String(64), primary_key=True)
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    device_name = Column(String(100), nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default=text("1"))
+    expires_at = Column(TIMESTAMP, nullable=False)
+    created_at = Column(
+        TIMESTAMP,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+    last_active_at = Column(
+        TIMESTAMP,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=text("CURRENT_TIMESTAMP")
+    )
+
+    user = relationship("User", back_populates="sessions")
+
+
+class EmailVerificationToken(Base):
+    __tablename__ = "email_verification_tokens"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(TIMESTAMP, nullable=False)
+    used_at = Column(TIMESTAMP, nullable=True)
+    created_at = Column(
+        TIMESTAMP,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    user = relationship("User", back_populates="verification_tokens")
+
+
+class PasswordResetToken(Base):
+    __tablename__ = "password_reset_tokens"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True
+    )
+    token_hash = Column(String(64), unique=True, nullable=False, index=True)
+    expires_at = Column(TIMESTAMP, nullable=False)
+    used_at = Column(TIMESTAMP, nullable=True)
+    created_at = Column(
+        TIMESTAMP,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    user = relationship("User", back_populates="reset_tokens")
+
+
+class LoginActivity(Base):
+    __tablename__ = "login_activities"
+
+    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True
+    )
+    email = Column(String(255), nullable=False, index=True)
+    status = Column(String(20), nullable=False)  # "success", "failed"
+    ip_address = Column(String(45), nullable=True)
+    user_agent = Column(Text, nullable=True)
+    created_at = Column(
+        TIMESTAMP,
+        server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    user = relationship("User", back_populates="login_activities")
+
+
 class Lecture(Base):
     __tablename__ = "lectures"
 
     id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
-    user_id = Column(BigInteger, nullable=False, server_default="0")
+    user_id = Column(
+        BigInteger,
+        ForeignKey("users.id", ondelete="CASCADE"),
+        nullable=False,
+        server_default="0"
+    )
     title = Column(String(255), nullable=False)
     audio_path = Column(Text, nullable=True)
     audio_format = Column(String(20), nullable=True)
@@ -34,6 +180,11 @@ class Lecture(Base):
     created_at = Column(
         TIMESTAMP,
         server_default=text("CURRENT_TIMESTAMP")
+    )
+
+    user = relationship(
+        "User",
+        back_populates="lectures"
     )
 
     transcript = relationship(
