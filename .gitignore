@@ -44,7 +44,10 @@ backend/generated/
 uploads/
 generated/
 
-# Vector databases / local indexes
+# Database files
+*.db
+*.sqlite
+*.sqlite3
 vectorstore/
 chroma/
 chroma_db/
