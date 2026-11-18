@@ -56,7 +56,7 @@ requests==2.34.2
 rich==15.0.0
 safetensors==0.8.0
 scikit-learn==1.9.1
-scipy==1.18.1
+scipy==1.15.3
 sentence-transformers==6.1.0
 setuptools==84.0.0
 shellingham==1.5.4
