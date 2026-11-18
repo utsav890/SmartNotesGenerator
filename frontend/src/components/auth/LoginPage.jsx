@@ -15,7 +15,11 @@ export default function LoginPage() {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
 
-  const redirectTarget = searchParams.get("redirect") || "/dashboard";
+  const rawRedirect = searchParams.get("redirect");
+  const redirectTarget =
+    !rawRedirect || rawRedirect === "/login" || rawRedirect === "/register"
+      ? "/dashboard"
+      : rawRedirect;
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -38,7 +42,18 @@ export default function LoginPage() {
       // Successful login -> navigate to intended destination
       navigate(redirectTarget);
     } catch (err) {
-      setErrorMessage(err.message || "Email or password is incorrect.");
+      const msg = err?.message || "";
+      if (
+        msg.toLowerCase().includes("failed to fetch") ||
+        msg.toLowerCase().includes("networkerror") ||
+        msg.toLowerCase().includes("connection refused")
+      ) {
+        setErrorMessage(
+          "Cannot connect to the backend server. Please verify that FastAPI is running on http://127.0.0.1:8000."
+        );
+      } else {
+        setErrorMessage(msg || "Email or password is incorrect.");
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -165,6 +180,33 @@ export default function LoginPage() {
                   {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
                 </button>
               </div>
+            </div>
+
+            {/* Quick Demo Fill */}
+            <div className="auth-quick-fill">
+              <span className="auth-quick-fill-label">Demo accounts:</span>
+              <button
+                type="button"
+                className="auth-quick-fill-btn"
+                onClick={() => {
+                  setEmail("regular.student@university.edu");
+                  setPassword("Std#P@ssword2026!");
+                  setErrorMessage("");
+                }}
+              >
+                Student
+              </button>
+              <button
+                type="button"
+                className="auth-quick-fill-btn"
+                onClick={() => {
+                  setEmail("admin.super@smartnotes.ai");
+                  setPassword("Admin#P@ssword2026!");
+                  setErrorMessage("");
+                }}
+              >
+                Admin
+              </button>
             </div>
 
             {/* Submit Button */}

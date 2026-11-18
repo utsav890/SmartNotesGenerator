@@ -51,7 +51,9 @@ import AdminPanel from "./components/admin/AdminPanel";
 import UserProfileMenu from "./components/auth/UserProfileMenu";
 
 const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8000";
+  import.meta.env.VITE_API_BASE_URL !== undefined
+    ? import.meta.env.VITE_API_BASE_URL
+    : "http://127.0.0.1:8000";
 
 // Curated high-yield samples for instant 1-click testing
 const SAMPLE_TRANSCRIPTS = {
@@ -314,7 +316,10 @@ function App() {
       }
     } else {
       if (pathname === "/login" || pathname === "/register") {
-        const target = searchParams.get("redirect") || "/dashboard";
+        const rawTarget = searchParams.get("redirect");
+        const target = (!rawTarget || rawTarget === "/login" || rawTarget === "/register")
+          ? "/dashboard"
+          : rawTarget;
         navigate(target, { replace: true });
       } else if (pathname === "/settings" || pathname === "/settings/security") {
         setView("security");
@@ -1099,7 +1104,7 @@ function App() {
             >
               <ShieldAlert size={18} aria-hidden="true" color="#c084fc" />
               Admin Panel
-              <span className="brand-badge" style={{ background: "rgba(168, 85, 247, 0.2)", color: "#c084fc", marginLeft: "auto", fontSize: "0.65rem", padding: "0.15rem 0.4rem" }}>
+              <span className="brand-badge" className="admin-nav-badge">
                 ADMIN
               </span>
             </button>
@@ -1114,7 +1119,7 @@ function App() {
             onClick={toggleTheme}
             aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
           >
-            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+            <span className="theme-toggle-inner">
               {theme === "dark" ? <Moon size={16} /> : <Sun size={16} />}
               <span>{theme === "dark" ? "Dark Mode" : "Light Mode"}</span>
             </span>
@@ -1123,14 +1128,13 @@ function App() {
             </span>
           </button>
 
-          <div className="profile-wrapper" style={{ display: "flex", alignItems: "center", width: "100%", gap: "6px" }}>
+          <div className="profile-wrapper">
             <div
               className="profile"
               onClick={() => {
                 setView("security");
                 navigate("/settings/security");
               }}
-              style={{ cursor: "pointer", flex: 1, minWidth: 0 }}
               title="Open Security & Account settings"
             >
               <div className="avatar">
@@ -1150,29 +1154,6 @@ function App() {
               }}
               title="Sign out of account"
               aria-label="Sign out"
-              style={{
-                background: "rgba(255, 255, 255, 0.04)",
-                border: "1px solid rgba(255, 255, 255, 0.08)",
-                color: "#94a3b8",
-                padding: "8px",
-                borderRadius: "8px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                flexShrink: 0,
-                transition: "all 150ms ease"
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.color = "#ef4444";
-                e.currentTarget.style.borderColor = "rgba(239, 68, 68, 0.35)";
-                e.currentTarget.style.background = "rgba(239, 68, 68, 0.12)";
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.color = "#94a3b8";
-                e.currentTarget.style.borderColor = "rgba(255, 255, 255, 0.08)";
-                e.currentTarget.style.background = "rgba(255, 255, 255, 0.04)";
-              }}
             >
               <LogOut size={16} />
             </button>
@@ -1213,7 +1194,7 @@ function App() {
             </span>
           </div>
 
-          <div className="topbar-right" style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div className="topbar-right">
             <span
               className={`status-badge${loading ? " is-loading" : ""}`}
               role="status"
@@ -1790,7 +1771,7 @@ function App() {
 
                     {/* Quick suggested questions */}
                     <div className="qa-chips-row">
-                      <span style={{ fontSize: "0.76rem", color: "var(--text-muted)", alignSelf: "center" }}>
+                      <span className="qa-chips-label">
                         Suggested questions:
                       </span>
                       <button
@@ -1957,7 +1938,7 @@ function App() {
                 }}
               >
                 <div className="delete-dialog-content">
-                  <span className="preview-kicker" style={{ color: "var(--danger)" }}>
+                  <span className="preview-kicker danger-kicker">
                     Irreversible Action
                   </span>
                   <h2 id="delete-dialog-title">Delete saved notes?</h2>
@@ -2011,7 +1992,7 @@ function App() {
                   <h1 id="quiz-title" tabIndex={-1}>
                     {quiz?.title || "Lecture Quiz"}
                   </h1>
-                  <p style={{ color: "var(--text-muted)", fontSize: "0.9rem" }}>{readerTitle}</p>
+                  <p className="quiz-subtitle">{readerTitle}</p>
                 </div>
                 {quiz && (
                   <span className="quiz-count">
@@ -2058,7 +2039,7 @@ function App() {
                         <h2 id="quiz-results-title" ref={quizResultsHeadingRef} tabIndex={-1}>
                           {getQuizScore()} <span>/ {quizQuestions.length}</span>
                         </h2>
-                        <p style={{ color: "var(--text-secondary)", marginTop: "4px" }}>
+                        <p className="quiz-score-desc">
                           {getQuizScore() === quizQuestions.length
                             ? "Outstanding mastery! You got every question correct."
                             : getQuizScore() >= Math.ceil(quizQuestions.length * 0.7)
@@ -2090,12 +2071,12 @@ function App() {
                             </p>
                             {!correct && (
                               <p className="quiz-selected-answer">
-                                Your selection: <span style={{ color: "var(--danger)" }}>{selectedAnswer}. {options[selectedAnswer]}</span>
+                                Your selection: <span className="danger-text">{selectedAnswer}. {options[selectedAnswer]}</span>
                               </p>
                             )}
                             {item.explanation && (
                               <div className="quiz-explanation">
-                                <strong style={{ display: "block", marginBottom: "4px", color: "var(--text-primary)" }}>
+                                <strong>
                                   Explanation &amp; Concept Rationale:
                                 </strong>
                                 <p>{item.explanation}</p>
