@@ -17,11 +17,13 @@ from sqlalchemy.orm import relationship
 
 from app.database import Base
 
+ID_TYPE = BigInteger().with_variant(Integer, "sqlite")
+
 
 class User(Base):
     __tablename__ = "users"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(ID_TYPE, primary_key=True, autoincrement=True)
     full_name = Column(String(100), nullable=False)
     email = Column(String(255), unique=True, nullable=False, index=True)
     password_hash = Column(Text, nullable=False)
@@ -97,7 +99,7 @@ class UserSession(Base):
 class EmailVerificationToken(Base):
     __tablename__ = "email_verification_tokens"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(ID_TYPE, primary_key=True, autoincrement=True)
     user_id = Column(
         BigInteger,
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -118,7 +120,7 @@ class EmailVerificationToken(Base):
 class PasswordResetToken(Base):
     __tablename__ = "password_reset_tokens"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(ID_TYPE, primary_key=True, autoincrement=True)
     user_id = Column(
         BigInteger,
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -139,7 +141,7 @@ class PasswordResetToken(Base):
 class LoginActivity(Base):
     __tablename__ = "login_activities"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(ID_TYPE, primary_key=True, autoincrement=True)
     user_id = Column(
         BigInteger,
         ForeignKey("users.id", ondelete="SET NULL"),
@@ -161,7 +163,7 @@ class LoginActivity(Base):
 class Lecture(Base):
     __tablename__ = "lectures"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    id = Column(ID_TYPE, primary_key=True, index=True, autoincrement=True)
     user_id = Column(
         BigInteger,
         ForeignKey("users.id", ondelete="CASCADE"),
@@ -216,7 +218,7 @@ class Lecture(Base):
 class Transcript(Base):
     __tablename__ = "transcripts"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(ID_TYPE, primary_key=True, autoincrement=True)
     lecture_id = Column(
         BigInteger,
         ForeignKey("lectures.id", ondelete="CASCADE"),
@@ -240,7 +242,7 @@ class Transcript(Base):
 class Note(Base):
     __tablename__ = "notes"
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(ID_TYPE, primary_key=True, autoincrement=True)
     lecture_id = Column(
         BigInteger,
         ForeignKey("lectures.id", ondelete="CASCADE"),
@@ -276,7 +278,7 @@ class LectureMessage(Base):
         ),
     )
 
-    id = Column(BigInteger, primary_key=True, autoincrement=True)
+    id = Column(ID_TYPE, primary_key=True, autoincrement=True)
     lecture_id = Column(
         BigInteger,
         ForeignKey(
