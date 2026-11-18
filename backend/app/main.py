@@ -16,7 +16,8 @@ from fastapi import (
     HTTPException,
     status
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, FileResponse
+from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -25,7 +26,7 @@ from sqlalchemy import text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from app.flashcard import generate_flashcards
-from app.database import get_db
+from app.database import Base, engine, SessionLocal, get_db
 from app.quiz import generate_quiz
 from app.transcription import transcribe_audio
 from app.notes_generator import answer_question, generate_notes
@@ -40,7 +41,7 @@ from app.models import (
     Quiz,
     QuizQuestion,
 )
-from app.auth import router as auth_router, get_current_user, get_current_user_optional
+from app.auth import router as auth_router, get_current_user, get_current_user_optional, hash_password
 from app.admin import router as admin_router
 
 
@@ -55,6 +56,37 @@ app = FastAPI(
     description="Generate and save structured lecture notes",
     version="1.0.0"
 )
+
+
+@app.on_event("startup")
+def on_startup():
+    """Ensure database schema is created and default demo users exist on boot."""
+    try:
+        Base.metadata.create_all(bind=engine)
+        with SessionLocal() as db:
+            existing = db.query(User).first()
+            if not existing:
+                admin_user = User(
+                    full_name="Super Admin",
+                    email="admin.super@smartnotes.ai",
+                    password_hash=hash_password("Admin#P@ssword2026!"),
+                    role="admin",
+                    is_verified=True,
+                    is_active=True
+                )
+                student_user = User(
+                    full_name="Regular Student",
+                    email="regular.student@university.edu",
+                    password_hash=hash_password("Std#P@ssword2026!"),
+                    role="user",
+                    is_verified=True,
+                    is_active=True
+                )
+                db.add_all([admin_user, student_user])
+                db.commit()
+                logger.info("Initialized default admin and student accounts.")
+    except Exception as exc:
+        logger.warning(f"Database startup check notice: {exc}")
 
 # --------------------------------------------------
 # CORS CONFIGURATION
@@ -1331,3 +1363,27 @@ def get_quiz(
             for question in questions
         ]
     }
+
+
+# --------------------------------------------------
+# STATIC SPA FRONTEND SERVING (For Unified Cloud Run)
+# --------------------------------------------------
+_static_candidates = [
+    BASE_DIR / "static",
+    BASE_DIR.parent / "frontend" / "dist",
+]
+_static_dir = next((p for p in _static_candidates if p.exists() and (p / "index.html").exists()), None)
+
+if _static_dir:
+    _assets_dir = _static_dir / "assets"
+    if _assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+
+    @app.get("/{full_path:path}")
+    async def serve_frontend_spa(full_path: str):
+        if full_path.startswith(("api/", "lectures", "transcribe", "notes", "ask", "quiz", "flashcard", "docs", "openapi.json")):
+            raise HTTPException(status_code=404, detail="Not Found")
+        file_target = _static_dir / full_path
+        if file_target.is_file():
+            return FileResponse(file_target)
+        return FileResponse(_static_dir / "index.html")

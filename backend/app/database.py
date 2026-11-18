@@ -12,19 +12,19 @@ ENV_PATH = BASE_DIR / ".env"
 
 load_dotenv(ENV_PATH)
 
-# Read MySQL connection URL
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Read MySQL / SQLite connection URL
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./smart_notes.db")
 
-if not DATABASE_URL:
-    raise RuntimeError(
-        "DATABASE_URL is missing in backend/.env"
-    )
+connect_args = {}
+if DATABASE_URL.startswith("sqlite"):
+    connect_args = {"check_same_thread": False}
 
 # Create database engine
 engine = create_engine(
     DATABASE_URL,
-    echo=True,
-    pool_pre_ping=True
+    echo=False,
+    pool_pre_ping=not DATABASE_URL.startswith("sqlite"),
+    connect_args=connect_args
 )
 
 # Create database sessions
