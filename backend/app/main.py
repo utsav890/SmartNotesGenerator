@@ -173,6 +173,22 @@ if os.getenv("ENVIRONMENT", "development") == "development":
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# Resolve static directory candidates for frontend SPA serving
+_static_candidates = [
+    BASE_DIR / "static",
+    BASE_DIR.parent / "frontend" / "dist",
+    BASE_DIR / "frontend" / "dist",
+    Path("/app/static"),
+    BASE_DIR / "dist",
+]
+STATIC_DIR = next((p for p in _static_candidates if p.is_dir() and (p / "index.html").is_file()), None)
+
+# Mount /assets if static build exists
+if STATIC_DIR:
+    _assets_dir = STATIC_DIR / "assets"
+    if _assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+
 UPLOAD_DIR = BASE_DIR / "data"
 UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
 
@@ -264,11 +280,13 @@ def get_user_lecture(lecture_id: int, user: User, db: Session) -> Lecture:
 
 
 # --------------------------------------------------
-# HOME ROUTE
+# ROOT / SPA / HEALTH CHECK ENDPOINTS
 # --------------------------------------------------
 
-@app.get("/")
+@app.get("/", include_in_schema=False)
 def home():
+    if STATIC_DIR and (STATIC_DIR / "index.html").is_file():
+        return FileResponse(STATIC_DIR / "index.html")
     return {
         "message": "Smart Notes Generator API is running"
     }
@@ -846,9 +864,22 @@ def get_lecture_notes(
 
 @app.get("/lectures")
 def get_all_lectures(
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    # Direct browser address-bar page load/refresh fallback to React SPA
+    is_browser_nav = (
+        request.headers.get("sec-fetch-dest") == "document" or
+        (
+            "text/html" in request.headers.get("accept", "") and
+            "application/json" not in request.headers.get("accept", "") and
+            "authorization" not in request.headers
+        )
+    )
+    if is_browser_nav and STATIC_DIR and (STATIC_DIR / "index.html").is_file():
+        return FileResponse(STATIC_DIR / "index.html")
+
     saved_lecture_exists = db.query(Note.id).filter(
         Note.lecture_id == Lecture.id
     ).exists()
@@ -1463,22 +1494,48 @@ def get_quiz(
 # --------------------------------------------------
 # STATIC SPA FRONTEND SERVING (For Unified Cloud Run)
 # --------------------------------------------------
-_static_candidates = [
-    BASE_DIR / "static",
-    BASE_DIR.parent / "frontend" / "dist",
-]
-_static_dir = next((p for p in _static_candidates if p.exists() and (p / "index.html").exists()), None)
 
-if _static_dir:
-    _assets_dir = _static_dir / "assets"
-    if _assets_dir.exists():
-        app.mount("/assets", StaticFiles(directory=str(_assets_dir)), name="assets")
+RESERVED_API_PREFIXES = (
+    "api/",
+    "api",
+    "health",
+    "db-test",
+    "docs",
+    "redoc",
+    "openapi.json",
+    "upload-audio",
+    "transcribe",
+    "generate-notes",
+)
 
-    @app.get("/{full_path:path}")
+
+if STATIC_DIR:
+    @app.get("/{full_path:path}", include_in_schema=False)
     async def serve_frontend_spa(full_path: str):
-        if full_path.startswith(("api/", "lectures", "transcribe", "notes", "ask", "quiz", "flashcard", "docs", "openapi.json")):
-            raise HTTPException(status_code=404, detail="Not Found")
-        file_target = _static_dir / full_path
-        if file_target.is_file():
-            return FileResponse(file_target)
-        return FileResponse(_static_dir / "index.html")
+        # 1. Never intercept backend API, monitoring, or documentation routes
+        trimmed = full_path.strip("/")
+        if trimmed in RESERVED_API_PREFIXES or any(trimmed.startswith(p) for p in ("api/", "docs/", "redoc/")):
+            raise HTTPException(status_code=404, detail="API route not found")
+
+        # 2. Check if the path points to an actual static asset in STATIC_DIR (e.g. favicon.svg, icons.svg)
+        try:
+            target = (STATIC_DIR / full_path).resolve()
+            if target.is_file() and str(target).startswith(str(STATIC_DIR.resolve())):
+                return FileResponse(target)
+        except Exception:
+            pass
+
+        # 3. If the path looks like a static asset file request with an extension, return 404 instead of HTML
+        path_obj = Path(full_path)
+        if path_obj.suffix and path_obj.suffix.lower() in {
+            ".js", ".css", ".map", ".json", ".png", ".jpg", ".jpeg",
+            ".gif", ".svg", ".ico", ".woff", ".woff2", ".ttf", ".webp"
+        }:
+            raise HTTPException(status_code=404, detail="Static asset not found")
+
+        # 4. For all client-side SPA routes (e.g. /dashboard, /login, /lecture/1, /notes), serve index.html
+        index_file = STATIC_DIR / "index.html"
+        if index_file.is_file():
+            return FileResponse(index_file)
+
+        raise HTTPException(status_code=404, detail="Page not found")
