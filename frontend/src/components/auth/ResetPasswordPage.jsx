@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { ShieldCheck, Eye, EyeOff, CheckCircle2, AlertCircle, ArrowRight, LoaderCircle, Check, X } from "lucide-react";
+import { ShieldCheck, Eye, EyeOff, AlertCircle, ArrowRight, LoaderCircle, Check, X } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useRouter } from "../../context/RouterContext";
 
@@ -12,7 +12,7 @@ function calculatePasswordStrength(pwd) {
     upper: /[A-Z]/.test(pwd),
     lower: /[a-z]/.test(pwd),
     number: /[0-9]/.test(pwd),
-    special: /[!@#$%^&*(),.?":{}|<>\-_=+/\\~`\[\]]/.test(pwd)
+    special: /[!@#$%^&*(),.?":{}|<>\-_=+/\\~`[\]]/.test(pwd)
   };
 
   const passedCount = Object.values(checks).filter(Boolean).length;

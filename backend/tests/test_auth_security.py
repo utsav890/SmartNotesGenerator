@@ -218,6 +218,11 @@ class TestAuthSecurity(unittest.TestCase):
         me_res = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {new_token}"})
         self.assertEqual(me_res.status_code, 200)
 
+        # Regress: Old refreshed token is invalidated and strictly rejected
+        old_me_res = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {old_token}"})
+        self.assertEqual(old_me_res.status_code, 401)
+        self.assertIn("revoked", old_me_res.json()["detail"].lower())
+
     def test_10_rbac_admin_authorization(self):
         """Verify Role-Based Access Control: Regular user blocked from admin endpoints."""
         # Login as student
@@ -256,8 +261,17 @@ class TestAuthSecurity(unittest.TestCase):
         })
         token = login_res.json()["token"]
 
+        # Token works initially
+        initial_me = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(initial_me.status_code, 200)
+
         logout_res = self.client.post(
             "/api/auth/logout",
             headers={"Authorization": f"Bearer {token}"}
         )
         self.assertEqual(logout_res.status_code, 200)
+
+        # Regress: Logged-out token must be strictly rejected with 401 Unauthorized
+        revoked_me = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+        self.assertEqual(revoked_me.status_code, 401)
+        self.assertIn("revoked", revoked_me.json()["detail"].lower())

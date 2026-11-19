@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { User as UserIcon, Shield, ShieldAlert, LogOut, ChevronDown, Check, AlertTriangle, BookOpen, LayoutDashboard } from "lucide-react";
+import { Shield, ShieldAlert, LogOut, ChevronDown, Check, AlertTriangle, BookOpen, LayoutDashboard } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useRouter } from "../../context/RouterContext";
 

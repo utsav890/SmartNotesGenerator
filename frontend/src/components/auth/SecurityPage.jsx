@@ -1,5 +1,4 @@
 import { useState, useEffect } from "react";
-import { motion, useReducedMotion } from "framer-motion";
 import {
   Shield,
   KeyRound,
@@ -15,8 +14,7 @@ import {
   LoaderCircle,
   Eye,
   EyeOff,
-  Check,
-  X
+  Check
 } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useRouter } from "../../context/RouterContext";
@@ -29,11 +27,9 @@ export default function SecurityPage() {
     revokeSession,
     revokeOtherSessions,
     deleteAccount,
-    resendVerification,
-    refreshUser
+    resendVerification
   } = useAuth();
   const { navigate } = useRouter();
-  const shouldReduceMotion = useReducedMotion();
 
   // Overview state
   const [securityData, setSecurityData] = useState(null);

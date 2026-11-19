@@ -279,8 +279,8 @@ function NotesArticle({ notes, headingLevel = 3, showTitle = true }) {
 }
 
 function App() {
-  const { user, token, isAuthenticated, isLoading, isAdmin, logout } = useAuth();
-  const { pathname, searchParams, params, navigate } = useRouter();
+  const { user, isAuthenticated, isLoading, isAdmin, logout } = useAuth();
+  const { pathname, searchParams, navigate } = useRouter();
 
   // Theme state
   const [theme, setTheme] = useState(() => {
@@ -294,78 +294,6 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [copied, setCopied] = useState(false);
-
-  // Synchronize route and enforce authenticated protection
-  useEffect(() => {
-    if (isLoading) return;
-
-    const publicAuthRoutes = [
-      "/login",
-      "/register",
-      "/verify-email",
-      "/forgot-password",
-      "/reset-password"
-    ];
-
-    const isPublicAuthRoute = publicAuthRoutes.includes(pathname);
-
-    if (!isAuthenticated) {
-      if (!isPublicAuthRoute) {
-        const fullCurrentPath = pathname + (window.location.search || "");
-        navigate(`/login?redirect=${encodeURIComponent(fullCurrentPath)}`, { replace: true });
-      }
-    } else {
-      if (pathname === "/login" || pathname === "/register") {
-        const rawTarget = searchParams.get("redirect");
-        const target = (!rawTarget || rawTarget === "/login" || rawTarget === "/register")
-          ? "/dashboard"
-          : rawTarget;
-        navigate(target, { replace: true });
-      } else if (pathname === "/settings" || pathname === "/settings/security") {
-        setView("security");
-      } else if (pathname === "/admin") {
-        if (!isAdmin) {
-          navigate("/dashboard", { replace: true });
-        } else {
-          setView("admin");
-        }
-      } else if (pathname === "/lectures" || pathname === "/notes") {
-        setView("my-notes");
-      } else if (pathname.startsWith("/lecture/")) {
-        setView("note-reader");
-      } else if (pathname === "/" || pathname === "/dashboard") {
-        setView("dashboard");
-      }
-    }
-  }, [pathname, isAuthenticated, isLoading, searchParams, navigate]);
-
-  // Load library or deep-linked lecture when routing directly
-  useEffect(() => {
-    if (!isAuthenticated || isLoading) return;
-
-    if (pathname === "/lectures" || pathname === "/notes") {
-      apiRequest("/lectures")
-        .then((result) => {
-          if (Array.isArray(result?.lectures)) {
-            setLectures(result.lectures);
-          }
-        })
-        .catch(() => {});
-    } else if (pathname.startsWith("/lecture/")) {
-      const lectureId = parseInt(pathname.split("/lecture/")[1], 10);
-      if (lectureId && (!selectedLecture || selectedLecture.id !== lectureId)) {
-        apiRequest(`/lectures/${lectureId}`)
-          .then((lectureData) => {
-            if (lectureData && lectureData.id) {
-              openSavedNote(lectureData);
-            }
-          })
-          .catch((err) => {
-            setNotesError(err.message || "Failed to load lecture");
-          });
-      }
-    }
-  }, [pathname, isAuthenticated, isLoading]);
 
   // Form Inputs & Processing
   const [file, setFile] = useState(null);
@@ -411,6 +339,134 @@ function App() {
   const quizQuestionHeadingRef = useRef(null);
   const quizResultsHeadingRef = useRef(null);
   const fileInputRef = useRef(null);
+
+  // Synchronize route and enforce authenticated protection
+  useEffect(() => {
+    if (isLoading) return;
+
+    const publicAuthRoutes = [
+      "/login",
+      "/register",
+      "/verify-email",
+      "/forgot-password",
+      "/reset-password"
+    ];
+
+    const isPublicAuthRoute = publicAuthRoutes.includes(pathname);
+
+    if (!isAuthenticated) {
+      if (!isPublicAuthRoute) {
+        const fullCurrentPath = pathname + (window.location.search || "");
+        navigate(`/login?redirect=${encodeURIComponent(fullCurrentPath)}`, { replace: true });
+      }
+    } else {
+      if (pathname === "/login" || pathname === "/register") {
+        const rawTarget = searchParams.get("redirect");
+        const target = (!rawTarget || rawTarget === "/login" || rawTarget === "/register")
+          ? "/dashboard"
+          : rawTarget;
+        navigate(target, { replace: true });
+      } else if (pathname === "/settings" || pathname === "/settings/security") {
+        setView("security");
+      } else if (pathname === "/admin") {
+        if (!isAdmin) {
+          navigate("/dashboard", { replace: true });
+        } else {
+          setView("admin");
+        }
+      } else if (pathname === "/lectures" || pathname === "/notes") {
+        setView("my-notes");
+      } else if (pathname.startsWith("/lecture/")) {
+        setView("note-reader");
+      } else if (pathname === "/" || pathname === "/dashboard") {
+        setView("dashboard");
+      }
+    }
+  }, [pathname, isAuthenticated, isLoading, isAdmin, searchParams, navigate]);
+
+  // Open specific note from library
+  const openSavedNote = async (lecture) => {
+    if (notesLoading) return;
+
+    if (pathname !== `/lecture/${lecture.id}`) {
+      navigate(`/lecture/${lecture.id}`);
+    }
+    setSelectedLecture(lecture);
+    setNotesError("");
+    setHistoryError("");
+    setQuestionError("");
+    setConversation([]);
+    setQuestion("");
+    setNotesLoading(true);
+    setHistoryLoading(true);
+    setView("note-reader");
+
+    try {
+      const [notesResult, historyResult] = await Promise.allSettled([
+        apiRequest(`/lectures/${lecture.id}/notes`),
+        apiRequest(`/lectures/${lecture.id}/questions`),
+      ]);
+
+      if (notesResult.status === "rejected") {
+        throw notesResult.reason;
+      }
+
+      const savedNote = Array.isArray(notesResult.value.notes)
+        ? notesResult.value.notes[0]
+        : null;
+
+      if (!savedNote) {
+        throw new Error("This lecture does not have generated notes yet.");
+      }
+
+      setNotes(formatNotes(savedNote));
+
+      if (historyResult.status === "fulfilled") {
+        setConversation(
+          Array.isArray(historyResult.value.messages)
+            ? historyResult.value.messages
+            : []
+        );
+      } else {
+        setHistoryError("Couldn’t load saved questions. Try again.");
+      }
+    } catch (err) {
+      console.error("Saved note loading error:", err);
+      setNotes("");
+      setNotesError(err.message || "Failed to load this note.");
+    } finally {
+      setNotesLoading(false);
+      setHistoryLoading(false);
+    }
+  };
+
+  // Load library or deep-linked lecture when routing directly
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+
+    if (pathname === "/lectures" || pathname === "/notes") {
+      apiRequest("/lectures")
+        .then((result) => {
+          if (Array.isArray(result?.lectures)) {
+            setLectures(result.lectures);
+          }
+        })
+        .catch(() => {});
+    } else if (pathname.startsWith("/lecture/")) {
+      const lectureId = parseInt(pathname.split("/lecture/")[1], 10);
+      if (lectureId && (!selectedLecture || selectedLecture.id !== lectureId)) {
+        apiRequest(`/lectures/${lectureId}`)
+          .then((lectureData) => {
+            if (lectureData && lectureData.id) {
+              openSavedNote(lectureData);
+            }
+          })
+          .catch((err) => {
+            setNotesError(err.message || "Failed to load lecture");
+          });
+      }
+    }
+  }, [pathname, isAuthenticated, isLoading, selectedLecture]);
 
   // Apply Theme
   useEffect(() => {
@@ -588,62 +644,6 @@ function App() {
       setNotesError(err.message || "Failed to load your saved notes.");
     } finally {
       setNotesLoading(false);
-    }
-  };
-
-  // Open specific note from library
-  const openSavedNote = async (lecture) => {
-    if (notesLoading) return;
-
-    if (pathname !== `/lecture/${lecture.id}`) {
-      navigate(`/lecture/${lecture.id}`);
-    }
-    setSelectedLecture(lecture);
-    setNotesError("");
-    setHistoryError("");
-    setQuestionError("");
-    setConversation([]);
-    setQuestion("");
-    setNotesLoading(true);
-    setHistoryLoading(true);
-    setView("note-reader");
-
-    try {
-      const [notesResult, historyResult] = await Promise.allSettled([
-        apiRequest(`/lectures/${lecture.id}/notes`),
-        apiRequest(`/lectures/${lecture.id}/questions`),
-      ]);
-
-      if (notesResult.status === "rejected") {
-        throw notesResult.reason;
-      }
-
-      const savedNote = Array.isArray(notesResult.value.notes)
-        ? notesResult.value.notes[0]
-        : null;
-
-      if (!savedNote) {
-        throw new Error("This lecture does not have generated notes yet.");
-      }
-
-      setNotes(formatNotes(savedNote));
-
-      if (historyResult.status === "fulfilled") {
-        setConversation(
-          Array.isArray(historyResult.value.messages)
-            ? historyResult.value.messages
-            : []
-        );
-      } else {
-        setHistoryError("Couldn’t load saved questions. Try again.");
-      }
-    } catch (err) {
-      console.error("Saved note loading error:", err);
-      setNotes("");
-      setNotesError(err.message || "Failed to load this note.");
-    } finally {
-      setNotesLoading(false);
-      setHistoryLoading(false);
     }
   };
 

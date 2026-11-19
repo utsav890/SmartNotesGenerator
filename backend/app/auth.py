@@ -36,15 +36,68 @@ COOKIE_NAME = "session_token"
 IS_SECURE_COOKIE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
 
 # --------------------------------------------------
-# JWT CONFIGURATION
+# JWT & SECRET VALIDATION
 # --------------------------------------------------
-JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-smartnotes-jwt-key-2026-eval-prod")
+INSECURE_PLACEHOLDER_SECRETS = {
+    "super-secret-smartnotes-jwt-key-2026-eval-prod",
+    "your_jwt_secret",
+    "super_secret_production_key_change_me_2026!",
+    "change_me",
+    "secret",
+    "jwt_secret",
+    "SmartNotesSuperSecretJwtKey2026!",
+    "replace_with_strong_random_secret_at_least_32_characters"
+}
+
+
+def get_and_validate_jwt_secret() -> str:
+    """Validate JWT secret strength. Require explicit strong configuration in production."""
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    secret = os.getenv("JWT_SECRET", "").strip()
+
+    if env == "production":
+        if not secret:
+            raise RuntimeError(
+                "CRITICAL SECURITY CONFIGURATION ERROR: "
+                "JWT_SECRET environment variable is missing in production. "
+                "You must configure a strong secret with at least 32 characters."
+            )
+        if secret in INSECURE_PLACEHOLDER_SECRETS:
+            raise RuntimeError(
+                "CRITICAL SECURITY CONFIGURATION ERROR: Insecure placeholder JWT_SECRET detected in production. "
+                "Generate a cryptographically random 32+ character key."
+            )
+        if len(secret) < 32:
+            raise RuntimeError(
+                f"CRITICAL SECURITY CONFIGURATION ERROR: JWT_SECRET length ({len(secret)}) is below minimum "
+                "security threshold (32 characters) for production."
+            )
+        return secret
+    else:
+        # Development / Testing fallback
+        if not secret:
+            secret = "dev-testing-insecure-jwt-secret-key-at-least-32-chars-long"
+        return secret
+
+
+JWT_SECRET = get_and_validate_jwt_secret()
 JWT_ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 
 
+def is_email_service_configured() -> bool:
+    """Check if an outbound SMTP or email service provider is configured."""
+    return bool(
+        os.getenv("SMTP_HOST") or
+        os.getenv("SENDGRID_API_KEY") or
+        os.getenv("MAILGUN_API_KEY") or
+        os.getenv("RESEND_API_KEY")
+    )
+
+
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
     """Generate a signed RFC 7519 compliant JSON Web Token with unique jti claim."""
+    secret = get_and_validate_jwt_secret()
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
     if expires_delta:
@@ -56,13 +109,14 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
         "iat": int(now.timestamp()),
         "jti": secrets.token_hex(16)
     })
-    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+    return jwt.encode(to_encode, secret, algorithm=JWT_ALGORITHM)
 
 
 def decode_access_token(token: str) -> dict:
     """Validate and decode a JWT access token, enforcing signature and expiration."""
+    secret = get_and_validate_jwt_secret()
     try:
-        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+        return jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
     except ExpiredSignatureError:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
@@ -325,12 +379,12 @@ def get_current_user_and_session(
 
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     user = None
-    session_record = None
+    secret = get_and_validate_jwt_secret()
 
     # 1. If token is formatted as JWT (header.payload.signature), validate signature & expiration
     if token.count(".") == 2:
         try:
-            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
             user_id = payload.get("sub")
             if user_id:
                 user = db.query(User).filter(User.id == int(user_id)).first()
@@ -345,7 +399,7 @@ def get_current_user_and_session(
                 detail="Invalid authentication token."
             )
 
-    # 2. Check session store to support revocation and session metadata
+    # 2. Check active database session for EVERY token to enforce logout & revocation
     t_hash = hash_token(token)
     session_record = db.query(UserSession).filter(
         UserSession.token_hash == t_hash,
@@ -353,13 +407,19 @@ def get_current_user_and_session(
         UserSession.expires_at > now
     ).first()
 
-    if not user and session_record:
+    if not session_record:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Session has been revoked or expired. Please sign in again."
+        )
+
+    if not user:
         user = db.query(User).filter(User.id == session_record.user_id).first()
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has expired or is invalid. Please sign in again."
+            detail="User not found or session is invalid."
         )
 
     if hasattr(user, "is_active") and not user.is_active:
@@ -368,18 +428,8 @@ def get_current_user_and_session(
             detail="Your account has been deactivated. Please contact an administrator."
         )
 
-    if session_record:
-        session_record.last_active_at = now
-        db.commit()
-    else:
-        # Synthesize active session object for JWT bearer
-        session_record = UserSession(
-            id=secrets.token_hex(16),
-            user_id=user.id,
-            token_hash=t_hash,
-            is_active=True,
-            expires_at=now + SESSION_DURATION
-        )
+    session_record.last_active_at = now
+    db.commit()
 
     return user, session_record
 
@@ -533,18 +583,27 @@ def register(
     session, raw_session_token = create_user_session(user, request, db)
     set_auth_cookie(response, raw_session_token)
 
-    logger.info(
-        "User registered: email=%s, verification_token=%s",
-        user.email,
-        raw_verify_token
-    )
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if env != "production":
+        logger.info(
+            "User registered: email=%s, verification_token=%s",
+            user.email,
+            raw_verify_token
+        )
+    else:
+        logger.info("User registered successfully: email=%s", user.email)
 
-    return {
+    result_data = {
         "message": "Account created successfully.",
         "user": serialize_user(user),
         "token": raw_session_token,
-        "verification_token": raw_verify_token  # Provided for easy verification flow in dev/demo
+        "access_token": raw_session_token
     }
+    # In production, never expose verification tokens in API payloads
+    if env != "production":
+        result_data["verification_token"] = raw_verify_token
+
+    return result_data
 
 
 @router.post("/login")
@@ -722,12 +781,30 @@ def resend_verification(
             db.add(token_record)
             db.commit()
             dev_token = raw_token
-            logger.info("Resent verification token for %s: %s", user.email, raw_token)
 
-    return {
-        "message": "If an account exists with this email, a verification link has been sent.",
-        "verification_token": dev_token
-    }
+            env = os.getenv("ENVIRONMENT", "development").lower()
+            if env != "production":
+                logger.info("Resent verification token for %s: %s", user.email, raw_token)
+            else:
+                logger.info("Resent verification notification processed.")
+
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    email_active = is_email_service_configured()
+
+    if not email_active:
+        msg = (
+            "Verification request received. Note: Automated outbound email service is not configured in this environment; "
+            "please contact a system administrator."
+            if env == "production"
+            else "Verification token created. (Notice: Outbound email service not configured in development mode)."
+        )
+    else:
+        msg = "If an account exists with this email address, verification instructions have been dispatched."
+
+    response_data = {"message": msg}
+    if env != "production" and dev_token:
+        response_data["verification_token"] = dev_token
+    return response_data
 
 
 @router.post("/forgot-password")
@@ -742,6 +819,7 @@ def forgot_password(
     user = db.query(User).filter(User.email == normalized_email).first()
 
     dev_token = None
+    env = os.getenv("ENVIRONMENT", "development").lower()
     if user:
         raw_reset_token = secrets.token_urlsafe(32)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -753,17 +831,31 @@ def forgot_password(
         db.add(reset_record)
         db.commit()
         dev_token = raw_reset_token
-        logger.info(
-            "Password reset requested for %s: token=%s",
-            user.email,
-            raw_reset_token
+        if env != "production":
+            logger.info(
+                "Password reset requested for %s: token=%s",
+                user.email,
+                raw_reset_token
+            )
+        else:
+            logger.info("Password reset request logged for processing.")
+
+    email_active = is_email_service_configured()
+    if not email_active:
+        msg = (
+            "Password reset request received. Note: Outbound email service is not configured in this environment; "
+            "please contact your platform administrator."
+            if env == "production"
+            else "Password reset requested. (Notice: Outbound email service not configured in development mode)."
         )
+    else:
+        msg = "If an account exists for this email, password reset instructions have been dispatched."
 
     # Strictly generic message to avoid leaking user existence
-    return {
-        "message": "If an account exists for this email, you'll receive a password reset link.",
-        "reset_token": dev_token  # Helpful in dev environment
-    }
+    response_data = {"message": msg}
+    if env != "production" and dev_token:
+        response_data["reset_token"] = dev_token
+    return response_data
 
 
 @router.post("/reset-password")

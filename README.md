@@ -51,7 +51,7 @@ flowchart TD
     subgraph Storage ["Persistence Layer"]
         DB[(MySQL 8.0 / SQLite)]
         VectorDB[(Qdrant Vector DB)]
-        DiskStore["Persistent Storage (Audio Chunks)"]
+        DiskStore["Ephemeral Scratch Storage\n(Local Container Filesystem)\n[GCS Bucket Recommended]"]
     end
 
     UI --> Nginx
@@ -75,7 +75,11 @@ NoteFlow is architected with defense-in-depth principles:
 * **Insecure Direct Object Reference (IDOR) Protection:** Strict user tenant isolation across all lectures, transcripts, notes, quizzes, flashcards, and Q&A endpoints.
 * **Audio Upload Security & Magic Byte Sniffing:** Validates file magic headers (`ID3`/MPEG for MP3, `RIFF/WAVE` for WAV, `ftyp` for M4A, `OggS` for OGG/OPUS, `\x1a\x45\xdf\xa3` for WebM) to block disguised binary uploads.
 * **OWASP Security Headers:** Middleware enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy`.
-* **Sliding-Window Rate Limiting:** Enforces in-memory rate limiting against brute-force authentication and denial-of-wallet LLM abuse.
+* **Rate Limiting & Horizontal Scalability:** An in-memory sliding-window limiter guards `/upload-audio`, `/transcribe`, `/generate-notes`, quizzes, flashcards, and authentication. *Architectural note: In serverless multi-instance deployments (such as Google Cloud Run), memory is isolated per container instance; for centralized cross-instance rate tracking across multiple Cloud Run replicas, an external Redis / Google Cloud Memorystore backend is recommended.*
+* **Storage Architecture (Ephemeral vs Durable):** Uploaded audio chunks are processed locally within the container's ephemeral scratch disk during runtime. To preserve uploaded media permanently across Cloud Run autoscaling events and restarts, durable Google Cloud Storage (GCS) buckets should be configured.
+* **No Hardcoded Secrets & Dynamic Strength Validation:** Hardcoded JWT fallbacks and database passwords have been completely eradicated. In production (`ENVIRONMENT=production`), the application strictly demands a strong `JWT_SECRET` (minimum 32 characters) on boot, refusing to start with weak or placeholder keys.
+* **Production Demo Seeding Lockdown:** Automatic default account creation (`admin.super` / `regular.student`) is strictly disabled in production. Demo setup is only allowed in non-production environments when `ENABLE_DEMO_SEEDING=true` is explicitly set.
+* **Information Disclosure Defense:** Public access to database diagnostics (`/db-test`) is restricted to administrators. Public monitoring is served via minimal `/health` and `/api/health` probes that never leak database names, connection strings, or system paths. In production, password reset and email verification tokens are never exposed in API payloads or application logs.
 * **Role-Based Access Control (RBAC):** Strict separation between student users and platform administrators via protected API dependency gates.
 * **SQL Injection Immunity:** All database queries are executed through SQLAlchemy ORM parameter binding with zero raw string interpolation.
 * **Path Traversal Defense:** Strict filename sanitization and safe file resolution preventing directory traversal.

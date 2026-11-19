@@ -46,7 +46,9 @@ from app.auth import (
     get_current_user,
     get_current_user_optional,
     hash_password,
-    check_rate_limit
+    check_rate_limit,
+    require_admin,
+    get_and_validate_jwt_secret
 )
 from app.admin import router as admin_router
 
@@ -66,31 +68,40 @@ app = FastAPI(
 
 @app.on_event("startup")
 def on_startup():
-    """Ensure database schema is created and default demo users exist on boot."""
+    """Ensure database schema is created, validate security secrets, and guard account seeding."""
     try:
+        # Validate JWT secret strength during boot
+        get_and_validate_jwt_secret()
+
         Base.metadata.create_all(bind=engine)
-        with SessionLocal() as db:
-            existing = db.query(User).first()
-            if not existing:
-                admin_user = User(
-                    full_name="Super Admin",
-                    email="admin.super@smartnotes.ai",
-                    password_hash=hash_password("Admin#P@ssword2026!"),
-                    role="admin",
-                    is_verified=True,
-                    is_active=True
-                )
-                student_user = User(
-                    full_name="Regular Student",
-                    email="regular.student@university.edu",
-                    password_hash=hash_password("Std#P@ssword2026!"),
-                    role="user",
-                    is_verified=True,
-                    is_active=True
-                )
-                db.add_all([admin_user, student_user])
-                db.commit()
-                logger.info("Initialized default admin and student accounts.")
+
+        env = os.getenv("ENVIRONMENT", "development").lower()
+        seed_demo = os.getenv("ENABLE_DEMO_SEEDING", "false").lower() == "true"
+
+        # Explicitly prevent default demo account creation in production
+        if env != "production" and seed_demo:
+            with SessionLocal() as db:
+                existing = db.query(User).first()
+                if not existing:
+                    admin_user = User(
+                        full_name="Super Admin",
+                        email="admin.super@smartnotes.ai",
+                        password_hash=hash_password("Admin#P@ssword2026!"),
+                        role="admin",
+                        is_verified=True,
+                        is_active=True
+                    )
+                    student_user = User(
+                        full_name="Regular Student",
+                        email="regular.student@university.edu",
+                        password_hash=hash_password("Std#P@ssword2026!"),
+                        role="user",
+                        is_verified=True,
+                        is_active=True
+                    )
+                    db.add_all([admin_user, student_user])
+                    db.commit()
+                    logger.info("Initialized default development demo accounts.")
     except Exception as exc:
         logger.warning(f"Database startup check notice: {exc}")
 
@@ -263,21 +274,44 @@ def home():
 
 
 # --------------------------------------------------
-# DATABASE CONNECTION TEST
+# SYSTEM HEALTH & MONITORING ENDPOINTS
 # --------------------------------------------------
+
+@app.get("/health")
+@app.get("/api/health")
+def health_check(
+    db: Session = Depends(get_db)
+):
+    """Minimal health check endpoint verifying database connectivity without leaking schemas or credentials."""
+    try:
+        db.execute(text("SELECT 1"))
+        return {
+            "status": "healthy",
+            "service": "smartnotes-api"
+        }
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database service unavailable"
+        )
+
 
 @app.get("/db-test")
 def test_database(
+    admin: User = Depends(require_admin),
     db: Session = Depends(get_db)
 ):
-    database = db.execute(
-        text("SELECT DATABASE()")
-    ).scalar()
-
-    return {
-        "message": "MySQL connected successfully",
-        "database": database
-    }
+    """Protected administrator database connection probe."""
+    try:
+        db.execute(text("SELECT 1"))
+        return {
+            "status": "connected"
+        }
+    except Exception:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database connection failure"
+        )
 
 
 # --------------------------------------------------

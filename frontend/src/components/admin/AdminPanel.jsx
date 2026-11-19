@@ -13,8 +13,6 @@ import {
   Search,
   RefreshCw,
   AlertTriangle,
-  Mail,
-  Calendar,
   Lock,
   ArrowRight
 } from "lucide-react";

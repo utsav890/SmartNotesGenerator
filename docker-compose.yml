@@ -4,16 +4,16 @@ services:
     container_name: smartnotes_mysql
     restart: always
     environment:
-      MYSQL_ROOT_PASSWORD: RootPassword2026!
-      MYSQL_DATABASE: smart_notes_db
-      MYSQL_USER: smartnotes_user
-      MYSQL_PASSWORD: NotesApp@2026
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-smart_notes_db}
+      MYSQL_USER: ${MYSQL_USER:-smartnotes_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}
     ports:
       - "127.0.0.1:3306:3306"
     volumes:
       - mysql_data:/var/lib/mysql
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-pRootPassword2026!"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -39,14 +39,14 @@ services:
       qdrant:
         condition: service_started
     environment:
-      DATABASE_URL: mysql+pymysql://smartnotes_user:NotesApp%402026@mysql:3306/smart_notes_db
-      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      DATABASE_URL: mysql+pymysql://${MYSQL_USER:-smartnotes_user}:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}@mysql:3306/${MYSQL_DATABASE:-smart_notes_db}
+      GROQ_API_KEY: ${GROQ_API_KEY:?Set GROQ_API_KEY in .env}
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
-      JWT_SECRET: ${JWT_SECRET:-SmartNotesSuperSecretJwtKey2026!}
-      ENVIRONMENT: production
-      COOKIE_SECURE: "false"
-      ALLOWED_ORIGINS: "*"
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
+      ENVIRONMENT: ${ENVIRONMENT:-production}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-https://smartnotes-ai-626471362775.asia-south1.run.app}
     ports:
       - "127.0.0.1:8000:8000"
 
@@ -64,4 +64,3 @@ services:
 volumes:
   mysql_data:
   qdrant_data:
-

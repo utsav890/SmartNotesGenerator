@@ -12,7 +12,7 @@ function calculatePasswordStrength(pwd) {
     upper: /[A-Z]/.test(pwd),
     lower: /[a-z]/.test(pwd),
     number: /[0-9]/.test(pwd),
-    special: /[!@#$%^&*(),.?":{}|<>\-_=+/\\~`\[\]]/.test(pwd)
+    special: /[!@#$%^&*(),.?":{}|<>\-_=+/\\~`[\]]/.test(pwd)
   };
 
   const passedCount = Object.values(checks).filter(Boolean).length;
@@ -30,7 +30,7 @@ function calculatePasswordStrength(pwd) {
 
 export default function RegisterPage() {
   const { register } = useAuth();
-  const { navigate, searchParams } = useRouter();
+  const { navigate, searchParams: _searchParams } = useRouter();
   const shouldReduceMotion = useReducedMotion();
 
   const [fullName, setFullName] = useState("");

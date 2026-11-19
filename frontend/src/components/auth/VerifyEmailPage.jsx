@@ -18,13 +18,6 @@ export default function VerifyEmailPage() {
   const [errorMessage, setErrorMessage] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
 
-  // Auto-verify if token is present in URL
-  useEffect(() => {
-    if (urlToken && !isSuccess && !isVerifying) {
-      handleVerification(urlToken);
-    }
-  }, [urlToken]);
-
   const handleVerification = async (tokenToVerify) => {
     const cleanToken = (tokenToVerify || tokenInput).trim();
     if (!cleanToken) {
@@ -47,6 +40,13 @@ export default function VerifyEmailPage() {
       setIsVerifying(false);
     }
   };
+
+  // Auto-verify if token is present in URL
+  useEffect(() => {
+    if (urlToken && !isSuccess && !isVerifying) {
+      handleVerification(urlToken);
+    }
+  }, [urlToken]);
 
   const handleResend = async () => {
     setIsResending(true);
