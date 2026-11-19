@@ -35,6 +35,6 @@ COPY run_local.py .
 # Expose FastAPI default port
 EXPOSE 8000
 
-# Start Uvicorn production server
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+# Start Uvicorn production server (with runtime secret generation if unset)
+CMD ["sh", "-c", "if [ -z \"$JWT_SECRET\" ]; then export JWT_SECRET=$(python -c 'import secrets; print(secrets.token_urlsafe(48))'); fi; exec uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 2"]
 

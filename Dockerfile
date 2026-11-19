@@ -24,7 +24,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENVIRONMENT=production \
-    PORT=8080
+    PORT=8000
 
 WORKDIR /app
 
@@ -48,12 +48,17 @@ RUN pip install --no-cache-dir --upgrade pip && \
 COPY backend/app/ ./app/
 COPY backend/migrations/ ./migrations/
 COPY backend/run_local.py .
+COPY docker-entrypoint.sh /app/docker-entrypoint.sh
+
+# Normalize line endings and grant execute permissions for entrypoint
+RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoint.sh
 
 # Copy built frontend SPA assets from Stage 1 into /app/static
 COPY --from=frontend-builder /build/dist ./static
 
-# Cloud Run automatically injects $PORT (default 8080)
-EXPOSE 8080
+# Cloud Run container port default (8000)
+EXPOSE 8000
 
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8080} --workers 1"]
+ENTRYPOINT ["/app/docker-entrypoint.sh"]
+CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1"]
 
