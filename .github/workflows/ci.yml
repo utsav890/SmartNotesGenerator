@@ -22,9 +22,11 @@ jobs:
           cache: "pip"
 
       - name: Install System Dependencies
+        env:
+          DEBIAN_FRONTEND: noninteractive
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg libmariadb-dev-compat libmariadb-dev pkg-config
+          sudo -E apt-get install -y --no-install-recommends ffmpeg libmariadb-dev-compat libmariadb-dev pkg-config
 
       - name: Install Python Dependencies
         run: |
