@@ -69,10 +69,11 @@ app = FastAPI(
 @app.on_event("startup")
 def on_startup():
     """Ensure database schema is created, validate security secrets, and guard account seeding."""
-    try:
-        # Validate JWT secret strength during boot
-        get_and_validate_jwt_secret()
+    # Critical security validation: enforce JWT secret strength before doing anything.
+    # Must terminate application startup if secret is missing or weak in production.
+    get_and_validate_jwt_secret()
 
+    try:
         Base.metadata.create_all(bind=engine)
 
         env = os.getenv("ENVIRONMENT", "development").lower()

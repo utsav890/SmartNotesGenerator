@@ -129,3 +129,83 @@ class TestProductionSecurityRegressions(unittest.TestCase):
                 self.assertNotIn("reset_token", data)
                 # Verify it does NOT falsely claim an email was dispatched
                 self.assertIn("not configured", data["message"].lower())
+
+    def test_06_startup_validation_crashes_on_invalid_production_jwt(self):
+        """Verify on_startup() crashes with RuntimeError on weak/missing JWT in production."""
+        from app.main import on_startup
+
+        # Missing JWT_SECRET in production MUST raise RuntimeError
+        with patch.dict(os.environ, {"ENVIRONMENT": "production", "JWT_SECRET": ""}):
+            with self.assertRaises(RuntimeError) as ctx:
+                on_startup()
+            self.assertIn("missing in production", str(ctx.exception))
+
+        # Placeholder JWT_SECRET in production MUST raise RuntimeError
+        with patch.dict(os.environ, {"ENVIRONMENT": "production", "JWT_SECRET": "change_me"}):
+            with self.assertRaises(RuntimeError) as ctx:
+                on_startup()
+            self.assertIn("Insecure placeholder", str(ctx.exception))
+
+    def test_07_revoked_session_blocked_across_multiple_protected_endpoints(self):
+        """Regression test: Proves revoked/logged-out JWTs cannot access protected endpoints."""
+        reg = self.client.post("/api/auth/register", json={
+            "full_name": "Revocation Subject",
+            "email": "revocation.subject@university.edu",
+            "password": "SecurePassword#2026!",
+            "confirm_password": "SecurePassword#2026!"
+        })
+        self.assertEqual(reg.status_code, 201)
+        token = reg.json()["token"]
+
+        # Token works initially
+        headers = {"Authorization": f"Bearer {token}"}
+        me_before = self.client.get("/api/auth/me", headers=headers)
+        self.assertEqual(me_before.status_code, 200)
+
+        # Logout revokes session
+        logout_res = self.client.post("/api/auth/logout", headers=headers)
+        self.assertEqual(logout_res.status_code, 200)
+
+        # Regress: Every protected endpoint strictly rejects the revoked token
+        for path in ("/api/auth/me", "/api/admin/overview", "/lectures"):
+            res = self.client.get(path, headers=headers)
+            self.assertEqual(res.status_code, 401)
+            self.assertIn("revoked", res.json()["detail"].lower())
+
+    def test_08_forged_stateless_jwt_without_active_db_session_rejected(self):
+        """Verify a cryptographically valid JWT signature without an active DB session is rejected."""
+        import jwt
+        from app.auth import JWT_SECRET, JWT_ALGORITHM
+
+        forged_token = jwt.encode(
+            {"sub": "99999", "email": "nonexistent@univ.edu", "role": "user", "exp": 9999999999},
+            JWT_SECRET,
+            algorithm=JWT_ALGORITHM
+        )
+
+        res = self.client.get("/api/auth/me", headers={"Authorization": f"Bearer {forged_token}"})
+        self.assertEqual(res.status_code, 401)
+        self.assertIn("revoked", res.json()["detail"].lower())
+
+    def test_09_email_provider_real_dispatch_and_failure_reporting(self):
+        """Verify email dispatch handling when mail provider is configured."""
+        with patch.dict(os.environ, {"ENVIRONMENT": "production"}):
+            # When SMTP provider is configured and dispatch succeeds
+            with patch.dict(os.environ, {"SMTP_HOST": "smtp.example.com", "SMTP_PORT": "587"}):
+                with patch("app.auth.send_email_message", return_value=True) as mock_send:
+                    res = self.client.post("/api/auth/forgot-password", json={
+                        "email": "admin.security@smartnotes.edu"
+                    })
+                    self.assertEqual(res.status_code, 200)
+                    mock_send.assert_called_once()
+                    self.assertIn("dispatched", res.json()["message"].lower())
+
+            # When SMTP provider is configured but delivery fails
+            with patch.dict(os.environ, {"SMTP_HOST": "smtp.example.com", "SMTP_PORT": "587"}):
+                with patch("app.auth.send_email_message", return_value=False) as mock_send_fail:
+                    res = self.client.post("/api/auth/forgot-password", json={
+                        "email": "admin.security@smartnotes.edu"
+                    })
+                    self.assertEqual(res.status_code, 200)
+                    mock_send_fail.assert_called_once()
+                    self.assertIn("failed", res.json()["message"].lower())

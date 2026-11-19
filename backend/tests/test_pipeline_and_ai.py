@@ -10,6 +10,7 @@ Covers:
 - Mocked Quiz & Flashcard generation (quiz.py & flashcard.py)
 """
 
+import os
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -21,6 +22,9 @@ from app.flashcard import generate_flashcards
 
 
 class TestPipelineAndAI(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        os.environ["GROQ_API_KEY"] = "gsk_ci_mock_test_key_for_automated_testing_12345"
     def test_01_clean_transcript_noise_and_markers(self):
         """Verify cleaner removes transcription artifacts, noise markers and excessive spaces."""
         raw = "Hello everyone... [applause]   Welcome to class [inaudible] ..   Today we cover AI."
@@ -91,13 +95,13 @@ class TestPipelineAndAI(unittest.TestCase):
             self.assertEqual(result["transcript"], "This is a transcribed lecture on microeconomics.")
             self.assertEqual(result["language"], "en")
 
-    @patch("app.notes_generator.Groq")
-    def test_07_mocked_notes_generation(self, mock_groq_class):
+    @patch("app.notes_generator.get_groq_client")
+    def test_07_mocked_notes_generation(self, mock_get_client):
         """Verify structured notes generation produces required Pydantic-compliant schema."""
         from app.notes_generator import generate_notes
 
         mock_client = MagicMock()
-        mock_groq_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         mock_completion = MagicMock()
         mock_completion.choices = [
@@ -122,13 +126,13 @@ class TestPipelineAndAI(unittest.TestCase):
         self.assertEqual(len(notes["sections"]), 1)
         self.assertEqual(notes["glossary"][0]["term"], "ReLU")
 
-    @patch("app.notes_generator.Groq")
-    def test_08_mocked_answer_question_rag(self, mock_groq_class):
+    @patch("app.notes_generator.get_groq_client")
+    def test_08_mocked_answer_question_rag(self, mock_get_client):
         """Verify RAG question answering formats context, retrieved sources, and returns confidence."""
         from app.notes_generator import answer_question
 
         mock_client = MagicMock()
-        mock_groq_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         mock_completion = MagicMock()
         mock_completion.choices = [
@@ -153,11 +157,11 @@ class TestPipelineAndAI(unittest.TestCase):
         self.assertIn("Backpropagation", res["answer"])
         self.assertEqual(res["confidence"], "high")
 
-    @patch("app.quiz.Groq")
-    def test_09_mocked_quiz_generation(self, mock_groq_class):
+    @patch("app.quiz.get_groq_client")
+    def test_09_mocked_quiz_generation(self, mock_get_client):
         """Verify quiz generator parses multiple choice questions, options, and explanations."""
         mock_client = MagicMock()
-        mock_groq_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         mock_completion = MagicMock()
         mock_completion.choices = [
@@ -189,11 +193,11 @@ class TestPipelineAndAI(unittest.TestCase):
         self.assertEqual(q["correct_answer"], "A")
         self.assertEqual(q["options"]["A"], "Energy storage")
 
-    @patch("app.flashcard.Groq")
-    def test_10_mocked_flashcard_generation(self, mock_groq_class):
+    @patch("app.flashcard.get_groq_client")
+    def test_10_mocked_flashcard_generation(self, mock_get_client):
         """Verify flashcard generator produces question and answer pairs."""
         mock_client = MagicMock()
-        mock_groq_class.return_value = mock_client
+        mock_get_client.return_value = mock_client
 
         mock_completion = MagicMock()
         mock_completion.choices = [

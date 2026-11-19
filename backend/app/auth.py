@@ -89,10 +89,89 @@ def is_email_service_configured() -> bool:
     """Check if an outbound SMTP or email service provider is configured."""
     return bool(
         os.getenv("SMTP_HOST") or
-        os.getenv("SENDGRID_API_KEY") or
-        os.getenv("MAILGUN_API_KEY") or
-        os.getenv("RESEND_API_KEY")
+        os.getenv("SENDGRID_API_KEY")
     )
+
+
+def send_email_message(
+    to_email: str,
+    subject: str,
+    text_content: str,
+    html_content: Optional[str] = None
+) -> bool:
+    """
+    Dispatch outbound transactional email via SMTP or SendGrid API.
+    Returns True if successfully sent, False otherwise.
+    """
+    smtp_host = os.getenv("SMTP_HOST")
+    sendgrid_key = os.getenv("SENDGRID_API_KEY")
+
+    if not smtp_host and not sendgrid_key:
+        return False
+
+    # Attempt SendGrid API if configured
+    if sendgrid_key:
+        try:
+            import urllib.request
+            import json
+            sender = os.getenv("SENDGRID_FROM", "no-reply@smartnotes.ai")
+            payload = {
+                "personalizations": [{"to": [{"email": to_email}]}],
+                "from": {"email": sender},
+                "subject": subject,
+                "content": [{"type": "text/plain", "value": text_content}]
+            }
+            if html_content:
+                payload["content"].append({"type": "text/html", "value": html_content})
+            req = urllib.request.Request(
+                "https://api.sendgrid.com/v3/mail/send",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={
+                    "Authorization": f"Bearer {sendgrid_key}",
+                    "Content-Type": "application/json"
+                },
+                method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if 200 <= resp.status < 300:
+                    logger.info("Dispatched email to %s via SendGrid", to_email)
+                    return True
+        except Exception as exc:
+            logger.error("Failed to send email via SendGrid to %s: %exc", to_email, exc)
+
+    # Attempt SMTP if configured
+    if smtp_host:
+        try:
+            from email.mime.multipart import MIMEMultipart
+            from email.mime.text import MIMEText
+            import smtplib
+
+            smtp_port = int(os.getenv("SMTP_PORT", "587"))
+            smtp_user = os.getenv("SMTP_USER")
+            smtp_pass = os.getenv("SMTP_PASSWORD")
+            smtp_from = os.getenv("SMTP_FROM", smtp_user or "no-reply@smartnotes.ai")
+            use_tls = os.getenv("SMTP_USE_TLS", "true").lower() == "true"
+
+            msg = MIMEMultipart("alternative")
+            msg["Subject"] = subject
+            msg["From"] = smtp_from
+            msg["To"] = to_email
+            msg.attach(MIMEText(text_content, "plain"))
+            if html_content:
+                msg.attach(MIMEText(html_content, "html"))
+
+            with smtplib.SMTP(smtp_host, smtp_port, timeout=10) as server:
+                if use_tls:
+                    server.starttls()
+                if smtp_user and smtp_pass:
+                    server.login(smtp_user, smtp_pass)
+                server.sendmail(smtp_from, [to_email], msg.as_string())
+            logger.info("Dispatched email to %s via SMTP", to_email)
+            return True
+        except Exception as exc:
+            logger.error("Failed to send email via SMTP to %s: %exc", to_email, exc)
+
+    return False
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
@@ -790,6 +869,36 @@ def resend_verification(
 
     env = os.getenv("ENVIRONMENT", "development").lower()
     email_active = is_email_service_configured()
+    email_dispatched = False
+
+    if email:
+        user = db.query(User).filter(User.email == email.strip().lower()).first()
+        if user and not user.is_verified:
+            # Invalidate older tokens
+            now = datetime.now(timezone.utc).replace(tzinfo=None)
+            raw_token = secrets.token_urlsafe(32)
+            token_record = EmailVerificationToken(
+                user_id=user.id,
+                token_hash=hash_token(raw_token),
+                expires_at=now + VERIFY_TOKEN_DURATION
+            )
+            db.add(token_record)
+            db.commit()
+            dev_token = raw_token
+
+            if email_active:
+                base_url = os.getenv("FRONTEND_URL", "https://smartnotes-ai-626471362775.asia-south1.run.app")
+                verify_url = f"{base_url}/verify-email?token={raw_token}"
+                email_dispatched = send_email_message(
+                    to_email=user.email,
+                    subject="SmartNotes AI - Verify Your Email",
+                    text_content=f"Welcome to SmartNotes AI!\nPlease verify your email by opening:\n{verify_url}\nThis link expires in 24 hours."
+                )
+
+            if env != "production":
+                logger.info("Resent verification token for %s: %s", user.email, raw_token)
+            else:
+                logger.info("Resent verification notification processed.")
 
     if not email_active:
         msg = (
@@ -798,6 +907,8 @@ def resend_verification(
             if env == "production"
             else "Verification token created. (Notice: Outbound email service not configured in development mode)."
         )
+    elif email and user and not email_dispatched:
+        msg = "Outbound email delivery failed. Please check mail provider settings or contact support."
     else:
         msg = "If an account exists with this email address, verification instructions have been dispatched."
 
@@ -820,6 +931,9 @@ def forgot_password(
 
     dev_token = None
     env = os.getenv("ENVIRONMENT", "development").lower()
+    email_active = is_email_service_configured()
+    email_dispatched = False
+
     if user:
         raw_reset_token = secrets.token_urlsafe(32)
         now = datetime.now(timezone.utc).replace(tzinfo=None)
@@ -831,6 +945,16 @@ def forgot_password(
         db.add(reset_record)
         db.commit()
         dev_token = raw_reset_token
+
+        if email_active:
+            base_url = os.getenv("FRONTEND_URL", "https://smartnotes-ai-626471362775.asia-south1.run.app")
+            reset_url = f"{base_url}/reset-password?token={raw_reset_token}"
+            email_dispatched = send_email_message(
+                to_email=user.email,
+                subject="SmartNotes AI - Password Reset Request",
+                text_content=f"You requested a password reset.\nPlease reset your password using:\n{reset_url}\nThis link expires in 1 hour."
+            )
+
         if env != "production":
             logger.info(
                 "Password reset requested for %s: token=%s",
@@ -840,7 +964,6 @@ def forgot_password(
         else:
             logger.info("Password reset request logged for processing.")
 
-    email_active = is_email_service_configured()
     if not email_active:
         msg = (
             "Password reset request received. Note: Outbound email service is not configured in this environment; "
@@ -848,6 +971,8 @@ def forgot_password(
             if env == "production"
             else "Password reset requested. (Notice: Outbound email service not configured in development mode)."
         )
+    elif user and not email_dispatched:
+        msg = "Outbound email delivery failed. Please check mail provider settings or contact support."
     else:
         msg = "If an account exists for this email, password reset instructions have been dispatched."
 
