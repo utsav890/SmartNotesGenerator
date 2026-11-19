@@ -71,11 +71,14 @@ flowchart TD
 ## 🛡️ Security & Enterprise Governance
 NoteFlow is architected with defense-in-depth principles:
 * **Password Hashing:** Uses `bcrypt` with work factor 12 and cryptographic salting.
-* **Session Security:** Stateless JWT Bearer tokens with strict expiration and database session revocation (supports remote logout and active session management).
+* **RFC 7519 JWT Authentication:** Stateless HS256-signed JWTs with unique `jti` claims, cryptographic signatures, expiration verification, and database session revocation.
+* **Insecure Direct Object Reference (IDOR) Protection:** Strict user tenant isolation across all lectures, transcripts, notes, quizzes, flashcards, and Q&A endpoints.
+* **Audio Upload Security & Magic Byte Sniffing:** Validates file magic headers (`ID3`/MPEG for MP3, `RIFF/WAVE` for WAV, `ftyp` for M4A, `OggS` for OGG/OPUS, `\x1a\x45\xdf\xa3` for WebM) to block disguised binary uploads.
+* **OWASP Security Headers:** Middleware enforces `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `X-XSS-Protection: 1; mode=block`, `Referrer-Policy: strict-origin-when-cross-origin`, and `Permissions-Policy`.
+* **Sliding-Window Rate Limiting:** Enforces in-memory rate limiting against brute-force authentication and denial-of-wallet LLM abuse.
 * **Role-Based Access Control (RBAC):** Strict separation between student users and platform administrators via protected API dependency gates.
 * **SQL Injection Immunity:** All database queries are executed through SQLAlchemy ORM parameter binding with zero raw string interpolation.
-* **Input Sanitization:** Pydantic schemas enforce type safety, email validation, length constraints, and file extension checks (`.mp3`, `.wav`, `.m4a`, etc.).
-* **Non-Root Execution:** Production Docker containers run unprivileged to mitigate container breakout risks.
+* **Path Traversal Defense:** Strict filename sanitization and safe file resolution preventing directory traversal.
 
 ---
 
@@ -90,22 +93,31 @@ NoteFlow is architected with defense-in-depth principles:
 ## ♿ Accessibility (a11y)
 * **High Contrast:** The custom obsidian charcoal palette (`#08090d` / `#f8fafc`) exceeds WCAG AAA contrast ratio standards (> 15:1).
 * **Semantic HTML5:** Built using standard `<header>`, `<main>`, `<aside>`, `<nav>`, `<article>`, and `<section>` tags.
-* **Screen Reader Optimization:** ARIA landmarks (`role="alert"`, `aria-expanded`, `aria-label`, `aria-hidden="true"` on decorative icons).
+* **Screen Reader Optimization:** ARIA landmarks (`role="alert"`, `aria-live="polite"`, `aria-expanded`, `aria-label`, `aria-hidden="true"` on decorative icons).
+* **Reduced Motion:** Fully honors `prefers-reduced-motion: reduce` settings.
 * **Keyboard Navigable:** Visible focus rings (`:focus-visible`) and full keyboard control across quiz cards, flashcards, and menus.
 
 ---
 
 ## 🧪 Testing & Verification
-The codebase includes comprehensive unit and integration test coverage:
-* **Password Hashing & Verification:** Tests bcrypt standards and reject malformed salts.
-* **Authentication Flow:** Validates registration, duplicate email prevention, weak password rejection, and authenticated endpoints.
-* **Continuous Integration:** Automated GitHub Actions pipeline (`.github/workflows/ci.yml`) executes tests and verifies frontend production builds on every push.
+The codebase includes a comprehensive 38+ automated unit, integration, and security test suite:
+* **`test_auth_security.py` (11 tests):** User registration, password complexity validation, duplicate email prevention, login, JWT issuance, expired token rejection, signature tampering detection, token refresh, and RBAC admin protection.
+* **`test_lectures_api.py` (10 tests):** Lecture CRUD lifecycle, multi-tenant IDOR attack protection, audio upload MIME & magic byte verification, file size limits (413), and path traversal defenses.
+* **`test_pipeline_and_ai.py` (10 tests):** Transcript cleaning, noise removal, topic segmentation, content coverage checking, mocked Whisper transcription, Groq note generation, RAG Q&A retrieval, and Quiz/Flashcard synthesis.
+* **`test_security_headers.py` (3 tests):** OWASP security response headers, rate limiting (429 Too Many Requests), and error message sanitization.
+* **`test_core.py` (4 tests):** Core regression suite.
 
-To execute backend unit tests locally:
+### Local Test Execution Guide
+To run the automated test suite locally:
 ```bash
-cd backend
-python -m unittest tests/test_core.py
+# Windows PowerShell
+$env:PYTHONPATH="backend"
+python -m unittest discover backend/tests
+
+# Linux / macOS
+PYTHONPATH=backend python3 -m unittest discover backend/tests
 ```
+Continuous Integration (`.github/workflows/ci.yml`) automatically executes this test suite and verifies React production builds on every commit.
 
 ---
 

@@ -8,6 +8,8 @@ from typing import Optional, List, Dict, Any
 from collections import defaultdict
 
 import bcrypt
+import jwt
+from jwt import ExpiredSignatureError, InvalidTokenError
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
@@ -32,6 +34,45 @@ VERIFY_TOKEN_DURATION = timedelta(hours=24)
 
 COOKIE_NAME = "session_token"
 IS_SECURE_COOKIE = os.getenv("COOKIE_SECURE", "false").lower() == "true"
+
+# --------------------------------------------------
+# JWT CONFIGURATION
+# --------------------------------------------------
+JWT_SECRET = os.getenv("JWT_SECRET", "super-secret-smartnotes-jwt-key-2026-eval-prod")
+JWT_ALGORITHM = "HS256"
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:
+    """Generate a signed RFC 7519 compliant JSON Web Token with unique jti claim."""
+    to_encode = data.copy()
+    now = datetime.now(timezone.utc)
+    if expires_delta:
+        expire = now + expires_delta
+    else:
+        expire = now + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
+    to_encode.update({
+        "exp": int(expire.timestamp()),
+        "iat": int(now.timestamp()),
+        "jti": secrets.token_hex(16)
+    })
+    return jwt.encode(to_encode, JWT_SECRET, algorithm=JWT_ALGORITHM)
+
+
+def decode_access_token(token: str) -> dict:
+    """Validate and decode a JWT access token, enforcing signature and expiration."""
+    try:
+        return jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+    except ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has expired. Please sign in again."
+        )
+    except InvalidTokenError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid authentication token."
+        )
 
 
 # --------------------------------------------------
@@ -282,26 +323,43 @@ def get_current_user_and_session(
             detail="Authentication required."
         )
 
-    t_hash = hash_token(token)
     now = datetime.now(timezone.utc).replace(tzinfo=None)
+    user = None
+    session_record = None
 
+    # 1. If token is formatted as JWT (header.payload.signature), validate signature & expiration
+    if token.count(".") == 2:
+        try:
+            payload = jwt.decode(token, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+            user_id = payload.get("sub")
+            if user_id:
+                user = db.query(User).filter(User.id == int(user_id)).first()
+        except ExpiredSignatureError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token has expired. Please sign in again."
+            )
+        except InvalidTokenError:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Invalid authentication token."
+            )
+
+    # 2. Check session store to support revocation and session metadata
+    t_hash = hash_token(token)
     session_record = db.query(UserSession).filter(
         UserSession.token_hash == t_hash,
         UserSession.is_active == True,
         UserSession.expires_at > now
     ).first()
 
-    if not session_record:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Session has expired or is invalid. Please sign in again."
-        )
+    if not user and session_record:
+        user = db.query(User).filter(User.id == session_record.user_id).first()
 
-    user = db.query(User).filter(User.id == session_record.user_id).first()
     if not user:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="User not found."
+            detail="Session has expired or is invalid. Please sign in again."
         )
 
     if hasattr(user, "is_active") and not user.is_active:
@@ -310,9 +368,18 @@ def get_current_user_and_session(
             detail="Your account has been deactivated. Please contact an administrator."
         )
 
-    # Update last_active_at periodically
-    session_record.last_active_at = now
-    db.commit()
+    if session_record:
+        session_record.last_active_at = now
+        db.commit()
+    else:
+        # Synthesize active session object for JWT bearer
+        session_record = UserSession(
+            id=secrets.token_hex(16),
+            user_id=user.id,
+            token_hash=t_hash,
+            is_active=True,
+            expires_at=now + SESSION_DURATION
+        )
 
     return user, session_record
 
@@ -371,7 +438,12 @@ def create_user_session(
     request: Request,
     db: Session
 ) -> tuple[UserSession, str]:
-    raw_token = secrets.token_urlsafe(48)
+    # Generate signed JWT access token
+    raw_token = create_access_token({
+        "sub": str(user.id),
+        "email": user.email,
+        "role": getattr(user, "role", "user") or "user"
+    })
     t_hash = hash_token(raw_token)
     session_id = secrets.token_hex(16)
     ua = get_user_agent(request)
@@ -549,6 +621,29 @@ def logout(
 
     clear_auth_cookie(response)
     return {"message": "You have been logged out successfully."}
+
+
+@router.post("/refresh")
+def refresh_session_token(
+    request: Request,
+    response: Response,
+    user_and_session: tuple[User, UserSession] = Depends(get_current_user_and_session),
+    db: Session = Depends(get_db)
+):
+    """Generate a refreshed JWT access token for active authenticated user."""
+    user, old_session = user_and_session
+    old_session.is_active = False
+    db.commit()
+
+    new_session, new_token = create_user_session(user, request, db)
+    set_auth_cookie(response, new_token)
+
+    return {
+        "message": "Token refreshed successfully.",
+        "token": new_token,
+        "access_token": new_token,
+        "user": serialize_user(user)
+    }
 
 
 @router.get("/me")

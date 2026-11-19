@@ -31,14 +31,14 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r backend/requirements.txt
 
-      - name: Run Backend Unit Tests
+      - name: Run Backend Unit & Security Tests
         env:
           DATABASE_URL: "sqlite:///:memory:"
           ENVIRONMENT: "testing"
           JWT_SECRET: "CiSecretKeyForAutomatedEvaluation2026!"
         run: |
           cd backend
-          python -m unittest tests/test_core.py
+          python -m unittest discover tests
 
   frontend-build:
     name: Frontend Build & Verification
@@ -64,3 +64,4 @@ jobs:
         run: |
           cd frontend
           npm run build
+

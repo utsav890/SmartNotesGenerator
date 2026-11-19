@@ -7,38 +7,12 @@ import os
 import unittest
 from pathlib import Path
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-TEST_DB_FILE = Path(__file__).resolve().parent / "test_eval.db"
-if TEST_DB_FILE.exists():
-    try:
-        TEST_DB_FILE.unlink()
-    except Exception:
-        pass
-
-test_engine = create_engine(f"sqlite:///{TEST_DB_FILE}", connect_args={"check_same_thread": False})
-TestingSessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=test_engine)
-
-import app.database as db_module
-db_module.engine = test_engine
-db_module.SessionLocal = TestingSessionLocal
-
-from app.database import Base, get_db
+from tests.setup_test_db import test_engine, TestingSessionLocal
+from app.database import Base
 from app.models import User
 from app.auth import hash_password, verify_password
 from app.main import app
-
-
-def override_get_db():
-    db = TestingSessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-app.dependency_overrides[get_db] = override_get_db
 
 
 class TestSmartNotesCore(unittest.TestCase):
@@ -46,15 +20,6 @@ class TestSmartNotesCore(unittest.TestCase):
     def setUpClass(cls):
         Base.metadata.create_all(bind=test_engine)
         cls.client = TestClient(app)
-
-    @classmethod
-    def tearDownClass(cls):
-        Base.metadata.drop_all(bind=test_engine)
-        if TEST_DB_FILE.exists():
-            try:
-                TEST_DB_FILE.unlink()
-            except Exception:
-                pass
 
     def test_01_password_hashing_security(self):
         """Verify bcrypt password hashing and verification adhere to OWASP standards."""

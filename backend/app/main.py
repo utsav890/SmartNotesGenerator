@@ -41,7 +41,13 @@ from app.models import (
     Quiz,
     QuizQuestion,
 )
-from app.auth import router as auth_router, get_current_user, get_current_user_optional, hash_password
+from app.auth import (
+    router as auth_router,
+    get_current_user,
+    get_current_user_optional,
+    hash_password,
+    check_rate_limit
+)
 from app.admin import router as admin_router
 
 
@@ -110,6 +116,20 @@ app.add_middleware(
 app.include_router(auth_router)
 app.include_router(admin_router)
 
+@app.middleware("http")
+async def apply_owasp_security_headers(request: Request, call_next):
+    """Enforce defense-in-depth OWASP HTTP security response headers."""
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["X-XSS-Protection"] = "1; mode=block"
+    response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
+    response.headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()"
+    if os.getenv("ENVIRONMENT", "development").lower() == "production":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
+    return response
+
+
 if os.getenv("ENVIRONMENT", "development") == "development":
 
     @app.middleware("http")
@@ -153,6 +173,26 @@ ALLOWED_EXTENSIONS = {
 }
 
 MAX_FILE_SIZE = 50 * 1024 * 1024
+
+
+def validate_audio_magic_bytes(contents: bytes, extension: str) -> bool:
+    """Validate file binary signature against declared audio format to block disguised files."""
+    if len(contents) < 4:
+        return False
+    ext = extension.lower()
+    if ext == ".mp3":
+        # ID3 tag or MPEG sync header
+        return contents[:3] == b"ID3" or (contents[0] == 0xFF and (contents[1] & 0xE0) == 0xE0)
+    elif ext == ".wav":
+        # RIFF....WAVE
+        return len(contents) >= 12 and contents[:4] == b"RIFF" and contents[8:12] == b"WAVE"
+    elif ext in (".m4a", ".mp4"):
+        return len(contents) >= 8 and (b"ftyp" in contents[:16] or contents[4:8] == b"ftyp")
+    elif ext in (".ogg", ".opus"):
+        return contents[:4] == b"OggS"
+    elif ext == ".webm":
+        return contents[:4] == b"\x1a\x45\xdf\xa3"
+    return True
 
 
 # --------------------------------------------------
@@ -293,10 +333,13 @@ def create_lecture(
 
 @app.post("/upload-audio")
 async def upload_audio(
+    request: Request,
     file: UploadFile = File(...),
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    check_rate_limit(request)
+
     if not file.filename:
         raise HTTPException(
             status_code=400,
@@ -326,6 +369,12 @@ async def upload_audio(
         raise HTTPException(
             status_code=413,
             detail="File size must not exceed 50 MB"
+        )
+
+    if not validate_audio_magic_bytes(contents, extension):
+        raise HTTPException(
+            status_code=400,
+            detail="File content does not match the audio format extension. Disguised files are rejected."
         )
 
     # Generate unique filename
@@ -385,9 +434,11 @@ async def upload_audio(
 @app.post("/transcribe/{filename}")
 def transcribe_lecture(
     filename: str,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    check_rate_limit(request)
     request_started_at = time.perf_counter()
 
     # Prevent directory traversal
@@ -498,9 +549,11 @@ def transcribe_lecture(
 
 @app.post("/generate-notes")
 def create_notes(
-    request: NotesRequest
+    notes_request: NotesRequest,
+    request: Request
 ):
-    if not request.transcript.strip():
+    check_rate_limit(request)
+    if not notes_request.transcript.strip():
         raise HTTPException(
             status_code=400,
             detail="Transcript cannot be empty"
@@ -508,7 +561,7 @@ def create_notes(
 
     try:
         notes = generate_notes(
-            request.transcript
+            notes_request.transcript
         )
 
         return {
@@ -539,9 +592,11 @@ def create_notes(
 @app.post("/lectures/{lecture_id}/generate-notes")
 def create_and_save_notes(
     lecture_id: int,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    check_rate_limit(request)
 
     # Find and verify lecture ownership
     lecture = get_user_lecture(lecture_id, current_user, db)
@@ -841,9 +896,11 @@ def get_lecture_questions(
 def ask_lecture_question(
     lecture_id: int,
     request: LectureQuestionRequest,
+    http_request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    check_rate_limit(http_request)
     # --------------------------------------------------
     # FIND LECTURE & VERIFY OWNERSHIP
     # --------------------------------------------------
@@ -1140,9 +1197,11 @@ def delete_lecture_notes(
 @app.post("/lectures/{lecture_id}/flashcards")
 def create_flashcards(
     lecture_id: int,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+    check_rate_limit(request)
     lecture = get_user_lecture(lecture_id, current_user, db)
 
     latest_note = db.query(Note).filter(
@@ -1218,10 +1277,11 @@ def create_flashcards(
 @app.post("/lectures/{lecture_id}/quiz")
 def create_quiz(
     lecture_id: int,
+    request: Request,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-
+    check_rate_limit(request)
     lecture = get_user_lecture(lecture_id, current_user, db)
 
     latest_note = db.query(Note).filter(
