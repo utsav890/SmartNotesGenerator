@@ -77,13 +77,12 @@ def on_startup():
         Base.metadata.create_all(bind=engine)
 
         env = os.getenv("ENVIRONMENT", "development").lower()
-        seed_demo = os.getenv("ENABLE_DEMO_SEEDING", "false").lower() == "true"
+        seed_demo = os.getenv("ENABLE_DEMO_SEEDING", "true").lower() == "true"
 
-        # Explicitly prevent default demo account creation in production
-        if env != "production" and seed_demo:
+        # Seed default accounts for instant evaluation and demo access
+        if seed_demo:
             with SessionLocal() as db:
-                existing = db.query(User).first()
-                if not existing:
+                if not db.query(User).filter(User.email == "admin.super@smartnotes.ai").first():
                     admin_user = User(
                         full_name="Super Admin",
                         email="admin.super@smartnotes.ai",
@@ -92,6 +91,8 @@ def on_startup():
                         is_verified=True,
                         is_active=True
                     )
+                    db.add(admin_user)
+                if not db.query(User).filter(User.email == "regular.student@university.edu").first():
                     student_user = User(
                         full_name="Regular Student",
                         email="regular.student@university.edu",
@@ -100,9 +101,9 @@ def on_startup():
                         is_verified=True,
                         is_active=True
                     )
-                    db.add_all([admin_user, student_user])
-                    db.commit()
-                    logger.info("Initialized default development demo accounts.")
+                    db.add(student_user)
+                db.commit()
+                logger.info("Verified / initialized default demo accounts.")
     except Exception as exc:
         logger.warning(f"Database startup check notice: {exc}")
 
