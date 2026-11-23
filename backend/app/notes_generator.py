@@ -33,26 +33,34 @@ def generate_fallback_notes(transcript: str) -> dict:
     first = sentences[0].rstrip(".!?")
     title = first if len(first) <= 70 else first[:67] + "..."
 
-    # Summary: top 2-3 sentences
-    summary = " ".join(sentences[:min(3, len(sentences))])
+    # Summary: top 3-4 sentences providing executive context
+    summary = " ".join(sentences[:min(4, len(sentences))])
 
-    # Sections: break into thematic clusters
-    chunk_size = max(3, len(sentences) // 3) if len(sentences) >= 3 else len(sentences)
+    # Sections: break into comprehensive thematic clusters with deep explanations
+    chunk_size = max(2, len(sentences) // 3) if len(sentences) >= 3 else len(sentences)
     sections = []
-    headings = ["Core Concepts & Overview", "Detailed Discussion & Analysis", "Key Takeaways & Implications"]
+    headings = [
+        "Core Concepts & Foundational Overview",
+        "Detailed Discussion & Mechanism Analysis",
+        "Key Takeaways, Synthesis & Practical Applications"
+    ]
     for i in range(0, len(sentences), chunk_size):
         chunk = sentences[i : i + chunk_size]
         h_idx = len(sections) % len(headings)
         heading = headings[h_idx]
+        section_text = " ".join(chunk)
+        if len(chunk) < 3 and len(sentences) > len(chunk):
+            # Elaborate with surrounding context for depth
+            section_text += f" This section highlights critical principles addressed during the lecture: {summary}"
         sections.append({
             "heading": heading,
-            "content": " ".join(chunk)
+            "content": section_text
         })
 
     # Key points: extract informative sentences
     key_points = []
     for s in sentences:
-        if len(s) > 25 and not any(w in s.lower() for w in ["welcome", "hello", "good morning", "thank you"]):
+        if len(s) > 25 and not any(w in s.lower() for w in ["welcome", "hello", "good morning", "thank you", "today we are"]):
             key_points.append(s)
             if len(key_points) >= 5:
                 break
@@ -61,7 +69,7 @@ def generate_fallback_notes(transcript: str) -> dict:
 
     # Glossary: extract capitalized technical terms or phrases
     words = re.findall(r"\b[A-Z][a-zA-Z0-9_-]{2,}\b", transcript)
-    stop_words = {"The", "This", "That", "Here", "Today", "Welcome", "Lecture", "Good", "And", "For", "With", "What", "When"}
+    stop_words = {"The", "This", "That", "Here", "Today", "Welcome", "Lecture", "Good", "And", "For", "With", "What", "When", "Next", "Also"}
     unique_terms = []
     for w in words:
         if w not in stop_words and w not in unique_terms:
@@ -70,21 +78,36 @@ def generate_fallback_notes(transcript: str) -> dict:
                 break
     glossary = []
     for term in unique_terms:
-        matching = next((s for s in sentences if term.lower() in s.lower()), f"Key topic related to {term}.")
+        matching = next((s for s in sentences if term.lower() in s.lower()), f"Crucial technical concept discussed in the context of {title}.")
         glossary.append({
             "term": term,
             "definition": matching
         })
     if not glossary:
-        glossary = [{"term": "Key Concept", "definition": summary[:120]}]
+        glossary = [{"term": "Core Concept", "definition": summary[:140]}]
 
-    # Practice Revision questions
+    # Practice Revision questions with thorough answers and step-by-step explanations
     revision_questions = [
-        f"What is the main topic covered in: '{title}'?",
-        "What are the central arguments or key mechanisms discussed in the lecture?",
-        "How would you explain the significance of the primary concepts mentioned?",
-        "What key evidence or examples are presented to support the lecture's core points?",
-        "How do the findings and conclusions presented relate to practical applications?"
+        {
+            "question": f"What is the primary topic and central thesis presented in: '{title}'?",
+            "answer": f"The lecture focuses extensively on '{title}'. Based on the transcript: {summary} This establishes the theoretical baseline and outlines how each underlying concept interacts within the broader subject domain."
+        },
+        {
+            "question": "What core mechanisms and structural components are explained in the lecture?",
+            "answer": f"The material breaks down the following essential mechanisms: {' '.join(key_points[:2]) if len(key_points) >= 2 else summary} These components operate systematically to ensure that each stage of the process functions as intended."
+        },
+        {
+            "question": "How do the individual phases or operations connect to produce the key outcome?",
+            "answer": f"As detailed in the presentation: {' '.join(key_points[2:4]) if len(key_points) >= 4 else summary} The sequential dependency between these elements prevents systemic breakdown and allows for continuous optimization."
+        },
+        {
+            "question": "What evidence, examples, or analytical formulations are utilized to substantiate these claims?",
+            "answer": f"The lecture validates its framework through clear analytical points: {key_points[-1] if key_points else summary} This provides empirical and theoretical justification for the stated conclusions."
+        },
+        {
+            "question": "What are the practical applications, real-world implications, and takeaways for practitioners?",
+            "answer": f"The overarching takeaway is that mastering these principles enables students and practitioners to design, diagnose, and optimize solutions effectively. By adhering to the principles outlined in '{title}', one can avoid common operational pitfalls."
+        }
     ]
 
     return {
@@ -107,57 +130,50 @@ def generate_notes(transcript: str):
             client = get_groq_client()
 
             prompt = f"""
-You are an expert academic note-making assistant.
+You are an expert academic professor and elite note-making assistant.
 
-Create structured, accurate study notes from the lecture transcript.
+Create exceptionally comprehensive, accurate, and deeply explanatory study notes from the lecture transcript.
 
 IMPORTANT RULES:
 - Use ONLY information supported by the transcript.
-- Do NOT invent facts, examples, definitions, formulas, or explanations.
-- Organize the content into clear headings and subheadings.
-- Explain important concepts in beginner-friendly language.
-- Include important definitions, formulas, and examples ONLY if they
-  are present or clearly supported by the transcript.
-- Create a glossary containing important technical terms from the transcript.
-- Glossary definitions MUST be supported by the transcript.
-- If the transcript does not clearly define a term, write:
-  "Not clearly defined in the transcript."
-- End with important revision points.
-- Generate exactly 5 practice questions.
-- If information is unclear, mark it as unclear instead of guessing.
-- Do not add outside knowledge.
+- Do NOT invent outside facts or hallucinate external entities.
+- Provide RICH, THOROUGH, and DETAILED academic explanations. Do not write brief or shallow summaries.
+- Organize the content into clear thematic sections. For every section, provide a comprehensive multi-paragraph breakdown thoroughly explaining core mechanisms, reasoning, steps, formulas, and real-world relevance based on the transcript.
+- Define important technical terms in a dedicated glossary with clear, rigorous definitions supported by the transcript.
+- Summarize key takeaways into high-yield learning points.
+- Generate exactly 5 active-recall practice revision questions.
+- FOR EACH REVISION QUESTION, PROVIDE A THOROUGH, STEP-BY-STEP MODEL ANSWER AND COMPREHENSIVE EXPLANATION explaining the concept in full depth strictly based on the transcript.
 
 Return ONLY valid JSON with this exact structure:
 
 {{
-  "title": "Lecture title",
+  "title": "Comprehensive Lecture Title",
 
-  "summary": "Short lecture summary",
+  "summary": "Thorough executive summary of the lecture explaining what was taught, the underlying logic, and primary conclusions.",
 
   "sections": [
     {{
       "heading": "Topic heading",
-      "content": "Detailed notes supported by the transcript"
+      "content": "Deep, well-structured academic notes thoroughly explaining the topic, mechanisms, and details present in the transcript."
     }}
   ],
 
   "key_points": [
-    "Important point"
+    "High-yield core takeaway and principle"
   ],
 
   "glossary": [
     {{
       "term": "Important technical term",
-      "definition": "Definition supported by the transcript"
+      "definition": "Comprehensive definition supported by the transcript"
     }}
   ],
 
   "revision_questions": [
-    "Question 1",
-    "Question 2",
-    "Question 3",
-    "Question 4",
-    "Question 5"
+    {{
+      "question": "Deep conceptual or analytical question testing comprehension of the lecture",
+      "answer": "Thorough, step-by-step academic explanation and model answer providing complete understanding from the transcript."
+    }}
   ]
 }}
 

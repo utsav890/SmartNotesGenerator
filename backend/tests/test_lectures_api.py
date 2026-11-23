@@ -172,3 +172,53 @@ class TestLecturesAPI(unittest.TestCase):
         self.assertIn("lecture_id", data)
         self.assertIn("saved_filename", data)
         self.assertEqual(data["status"], "uploaded")
+
+    def test_11_generate_notes_saves_lecture_and_shows_in_lectures_list(self):
+        """Verify POST /generate-notes saves lecture, transcript, and note when authenticated, appearing in GET /lectures."""
+        transcript_sample = (
+            "Welcome to the lecture on Quantum Computing. Today we discuss qubits and quantum superposition. "
+            "Unlike classical bits that exist in state zero or one, a quantum bit or qubit can exist in a linear superposition of both states. "
+            "Quantum entanglement allows multiple qubits to exhibit correlated states across distances. "
+            "These principles enable quantum algorithms like Shor's algorithm to solve certain problems exponentially faster than classical computers."
+        )
+        res = self.client.post(
+            "/generate-notes",
+            json={"transcript": transcript_sample},
+            headers={"Authorization": f"Bearer {self.token_a}"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("notes", data)
+        self.assertIn("lecture_id", data)
+        self.assertIsNotNone(data["lecture_id"])
+        lec_id = data["lecture_id"]
+
+        # Verify it now appears in GET /lectures with summary and section counts
+        res_list = self.client.get(
+            "/lectures",
+            headers={"Authorization": f"Bearer {self.token_a}"}
+        )
+        self.assertEqual(res_list.status_code, 200)
+        lectures = res_list.json().get("lectures", [])
+        matching = [l for l in lectures if l["id"] == lec_id]
+        self.assertEqual(len(matching), 1)
+        self.assertIn("summary", matching[0])
+        self.assertIn("sections_count", matching[0])
+
+        # Verify notes detail contains glossary and questions with answers
+        res_notes = self.client.get(
+            f"/lectures/{lec_id}/notes",
+            headers={"Authorization": f"Bearer {self.token_a}"}
+        )
+        self.assertEqual(res_notes.status_code, 200)
+        notes_data = res_notes.json()
+        self.assertTrue(len(notes_data["notes"]) > 0)
+        first_note = notes_data["notes"][0]["content"]
+        self.assertIn("glossary", first_note)
+        self.assertIn("revision_questions", first_note)
+        self.assertTrue(len(first_note["revision_questions"]) > 0)
+        q = first_note["revision_questions"][0]
+        if isinstance(q, dict):
+            self.assertIn("question", q)
+            self.assertIn("answer", q)
+            self.assertTrue(len(q["answer"]) > 10)

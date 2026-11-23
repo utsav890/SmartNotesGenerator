@@ -1062,6 +1062,315 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
 .notes-questions ol { padding-left: 20px; display: flex; flex-direction: column; gap: 12px; }
 .notes-questions li { font-size: .91rem; color: var(--text-secondary); line-height: 1.6; padding-left: 4px; }
 
+/* Note Meta Pills & Section Actions */
+.notes-meta-pills {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.notes-meta-pill {
+  font-size: .75rem;
+  color: var(--text-muted);
+  background: var(--surface-elevated);
+  padding: 4px 10px;
+  border-radius: var(--radius-full);
+  border: 1px solid var(--border);
+  white-space: nowrap;
+}
+.notes-meta-pill.accent {
+  color: var(--accent);
+  background: var(--accent-soft);
+  border-color: var(--accent-border);
+}
+
+.note-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+.section-copy-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  font-size: .75rem;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.section-copy-btn:hover {
+  background: var(--surface-hover);
+  color: var(--text-primary);
+  border-color: var(--accent-border);
+}
+
+/* Glossary & Technical Terminology */
+.notes-glossary {
+  padding: 22px;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  box-shadow: inset 0 1px 0 rgba(255,255,255,.03);
+}
+.notes-glossary h3, .notes-glossary h4 {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-display);
+  font-size: 1.1rem;
+  font-weight: 750;
+  color: var(--text-primary);
+  margin-bottom: 16px;
+}
+.glossary-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+.glossary-card {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  transition: border-color var(--transition-fast);
+}
+.glossary-card:hover {
+  border-color: var(--accent-border);
+}
+.glossary-term-badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 3px 9px;
+  font-size: .76rem;
+  font-weight: 750;
+  color: #a5b4fc;
+  background: rgba(99, 102, 241, 0.12);
+  border: 1px solid var(--accent-border);
+  border-radius: var(--radius-full);
+}
+.glossary-definition {
+  font-size: .88rem;
+  color: var(--text-secondary);
+  line-height: 1.6;
+}
+
+/* Active Recall Questions & Answers */
+.questions-container {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+.question-card {
+  padding: 16px 18px;
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  transition: border-color var(--transition-fast);
+}
+.question-card:hover {
+  border-color: var(--border-hover);
+}
+.question-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+}
+.question-badge {
+  display: inline-grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: .78rem;
+  font-weight: 800;
+  border: 1px solid var(--accent-border);
+}
+.question-title {
+  font-size: .95rem;
+  font-weight: 650;
+  color: var(--text-primary);
+  line-height: 1.5;
+  margin: 0;
+}
+.question-answer-area {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-left: 40px;
+}
+.answer-toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  align-self: flex-start;
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
+  padding: 6px 12px;
+  border-radius: var(--radius-full);
+  font-size: .78rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+}
+.answer-toggle-btn:hover {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-color: var(--accent-border);
+}
+.answer-toggle-btn.active {
+  background: rgba(99, 102, 241, 0.15);
+  color: #c7d2fe;
+  border-color: var(--accent);
+}
+.answer-box {
+  padding: 14px 16px;
+  border-radius: var(--radius-sm);
+  background: rgba(16, 185, 129, 0.05);
+  border-left: 3px solid var(--success);
+  border-top: 1px solid rgba(16, 185, 129, 0.2);
+  border-right: 1px solid rgba(16, 185, 129, 0.2);
+  border-bottom: 1px solid rgba(16, 185, 129, 0.2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: fadeIn 0.2s ease-in-out;
+}
+.answer-box-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .76rem;
+  color: var(--success);
+  text-transform: uppercase;
+  letter-spacing: .06em;
+  font-weight: 750;
+}
+.answer-text {
+  font-size: .91rem;
+  color: var(--text-primary);
+  line-height: 1.65;
+  margin: 0;
+}
+
+/* Dashboard Recent Notes */
+.dashboard-recent-notes {
+  margin-top: 36px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+.recent-notes-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+}
+.recent-notes-header h2 {
+  font-family: var(--font-display);
+  font-size: 1.45rem;
+  font-weight: 800;
+  color: var(--text-primary);
+  margin-top: 2px;
+}
+.recent-notes-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 16px;
+}
+.recent-note-card {
+  padding: 18px;
+  border-radius: var(--radius-md);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  cursor: pointer;
+  transition: transform var(--transition-fast), border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+.recent-note-card:hover {
+  transform: translateY(-2px);
+  border-color: var(--accent-border);
+  box-shadow: var(--shadow-md);
+}
+.recent-note-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: .72rem;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  align-self: flex-start;
+  font-weight: 700;
+}
+.recent-note-title {
+  font-family: var(--font-display);
+  font-size: 1.05rem;
+  font-weight: 750;
+  color: var(--text-primary);
+  line-height: 1.35;
+  margin: 0;
+}
+.recent-note-summary {
+  font-size: .84rem;
+  color: var(--text-muted);
+  line-height: 1.55;
+  margin: 0;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.recent-note-footer {
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-soft);
+}
+.recent-note-date {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: .74rem;
+  color: var(--text-muted);
+}
+.recent-note-open {
+  font-size: .78rem;
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.lecture-card-summary {
+  font-size: .84rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+  margin: 6px 0 12px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
 /* --------------------------------------------------------------------------
    My Notes Library
    -------------------------------------------------------------------------- */
