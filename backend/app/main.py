@@ -66,155 +66,6 @@ app = FastAPI(
 )
 
 
-def seed_demo_lectures_if_needed(db: Session, student_user: User):
-    """Seed comprehensive starter lectures and study notes for the demo student user."""
-    has_lecture = db.query(Lecture.id).filter(Lecture.user_id == student_user.id).first()
-    if has_lecture:
-        return
-
-    # Seed Lecture 1: Artificial Neural Networks
-    lec1 = Lecture(
-        user_id=student_user.id,
-        title="Introduction to Artificial Neural Networks and Backpropagation",
-        status="completed"
-    )
-    db.add(lec1)
-    db.flush()
-
-    note1_content = {
-        "title": "Introduction to Artificial Neural Networks and Backpropagation",
-        "summary": "This foundational lecture explores the architecture, mathematical formulations, and training dynamics of artificial neural networks. It covers perceptron mathematics, the necessity of non-linear activation functions (such as ReLU and Sigmoid) to prevent architectural collapse, and the mechanics of gradient descent optimized via backpropagation.",
-        "sections": [
-            {
-                "heading": "Architectural Foundation of Artificial Perceptrons",
-                "content": "An artificial neuron operates by calculating the weighted sum of its inputs: z = sum(w_i * x_i) + b. Each synaptic weight adjusts the relative influence of input features, while the bias parameter shifts the activation threshold independently of inputs. This mimics biological dendritic inputs and axonal firing in neuroscience."
-            },
-            {
-                "heading": "Role of Non-Linear Activation Functions & ReLU",
-                "content": "Without non-linear activations, multi-layer networks collapse mathematically into a single linear matrix multiplication regardless of depth. Modern architectures favor the Rectified Linear Unit (ReLU), f(x) = max(0, x), which computes efficiently and maintains non-saturating positive gradients, effectively preventing vanishing gradients during training."
-            },
-            {
-                "heading": "Optimization via Gradient Descent & Backpropagation",
-                "content": "Learning occurs iteratively through forward passes and backward error propagation. By applying the multivariate chain rule backwards through computational graphs, optimizers such as Adam and SGD compute partial derivatives of loss with respect to each weight, incrementally adjusting parameters to minimize objective loss."
-            }
-        ],
-        "key_points": [
-            "Perceptrons compute linear combinations (z = sum(w*x) + b) before applying non-linear activation.",
-            "Non-linear activations prevent deep architectures from collapsing into trivial single-layer linear models.",
-            "ReLU (f(x) = max(0, x)) preserves gradient flow and mitigates vanishing gradient problems.",
-            "Backpropagation utilizes the calculus chain rule to systematically compute loss gradients across all layers.",
-            "Gradient descent iteratively updates parameters in the opposite direction of the gradient vector."
-        ],
-        "glossary": [
-            {"term": "Perceptron", "definition": "The fundamental mathematical building block of artificial neural networks that computes weighted input sums and applies an activation function."},
-            {"term": "ReLU", "definition": "Rectified Linear Unit; an activation function defined as f(x) = max(0, x), widely used for efficient training and gradient propagation."},
-            {"term": "Backpropagation", "definition": "Algorithm computing loss gradients with respect to every model parameter by backward application of the chain rule."},
-            {"term": "Vanishing Gradient", "definition": "Pathology in deep networks where gradient signals shrink exponentially when backpropagating through saturating non-linearities."}
-        ],
-        "revision_questions": [
-            {
-                "question": "Why do deep neural networks require non-linear activation functions?",
-                "answer": "Without non-linear activation functions, consecutive layers merely compute linear combinations of previous layers (matrix multiplications). Since the composition of linear functions is always linear, an N-layer linear network is mathematically equivalent to a single-layer model, completely losing the ability to approximate complex non-linear functions."
-            },
-            {
-                "question": "How does the Rectified Linear Unit (ReLU) help resolve the vanishing gradient problem?",
-                "answer": "Sigmoid and Tanh activations saturate at extreme values, causing their derivatives to approach zero and resulting in tiny gradient updates in earlier layers. In contrast, ReLU has a constant derivative of 1 for all positive inputs, allowing gradient signals to flow unimpeded through dozens of layers during backpropagation."
-            },
-            {
-                "question": "What is the role of the bias parameter in an artificial neuron?",
-                "answer": "The bias term 'b' allows the activation function to shift horizontally along the axis, decoupling the neuron's activation threshold from the zero-origin. Without a bias, every activation curve would be anchored at the origin when inputs are zero, severely restricting function fitting flexibility."
-            },
-            {
-                "question": "Explain how the chain rule of calculus is utilized in backpropagation.",
-                "answer": "Backpropagation uses the chain rule to decompose the derivative of the global loss with respect to intermediate weights into localized products of partial derivatives across each layer. This allows errors computed at the output to be sequentially propagated back through computational graph nodes."
-            },
-            {
-                "question": "What differentiates forward propagation from backward propagation?",
-                "answer": "Forward propagation feeds raw feature inputs through sequential layers and activations to generate a model prediction and evaluate loss. Backward propagation reverses the direction: it uses the calculated loss to compute analytical gradients with respect to all internal parameters to guide weight updates."
-            }
-        ]
-    }
-
-    db.add(Note(
-        lecture_id=lec1.id,
-        title=lec1.title,
-        summary=note1_content["summary"],
-        content=note1_content,
-        version=1
-    ))
-
-    # Seed Lecture 2: Cellular Respiration
-    lec2 = Lecture(
-        user_id=student_user.id,
-        title="Cellular Respiration and ATP Synthesis",
-        status="completed"
-    )
-    db.add(lec2)
-    db.flush()
-
-    note2_content = {
-        "title": "Cellular Respiration and ATP Synthesis",
-        "summary": "This lecture provides a comprehensive biochemical analysis of cellular respiration in eukaryotic cells. It details the step-by-step conversion of glucose and oxygen into usable metabolic energy across Glycolysis, the Citric Acid (Krebs) Cycle, and Oxidative Phosphorylation powered by the mitochondrial electron transport chain.",
-        "sections": [
-            {
-                "heading": "Glycolysis: Cytoplasmic Anaerobic Breakdown",
-                "content": "Glycolysis takes place in the cytoplasm and requires no oxygen. A single 6-carbon glucose molecule is enzymatically cleaved into two 3-carbon pyruvate molecules. This investment and payoff phase yields a net production of 2 ATP (via substrate-level phosphorylation) and 2 high-energy NADH electron carriers."
-            },
-            {
-                "heading": "The Citric Acid Cycle: Mitochondrial Matrix Decarboxylation",
-                "content": "Pyruvate enters the mitochondrial matrix and undergoes oxidative decarboxylation to form Acetyl-CoA. Acetyl-CoA enters the Citric Acid Cycle, cycling through citrate, ketoglutarate, and oxaloacetate, producing 2 ATP, 6 NADH, 2 FADH2, and releasing carbon dioxide as a metabolic byproduct."
-            },
-            {
-                "heading": "Oxidative Phosphorylation & ATP Synthase",
-                "content": "Electrons from NADH and FADH2 traverse protein complexes I through IV in the inner mitochondrial membrane, pumping protons into the intermembrane space to generate a powerful electrochemical proton motive force. The rotary motor protein ATP Synthase channels these protons back into the matrix, generating 28 to 32 ATP molecules per glucose molecule."
-            }
-        ],
-        "key_points": [
-            "Cellular respiration converts glucose into ATP through three interconnected metabolic stages.",
-            "Glycolysis occurs in the cytoplasm anaerobically, producing 2 net ATP and 2 NADH.",
-            "The Krebs Cycle operates in the mitochondrial matrix, oxidizing Acetyl-CoA and releasing CO2.",
-            "Oxidative Phosphorylation leverages the electron transport chain to establish a proton motive force.",
-            "ATP Synthase functions as a molecular rotary generator, synthesizing up to 32 ATP per glucose."
-        ],
-        "glossary": [
-            {"term": "ATP", "definition": "Adenosine Triphosphate; the universal molecular currency of intracellular energy transfer."},
-            {"term": "Glycolysis", "definition": "The anaerobic enzymatic breakdown of glucose into pyruvate in the cellular cytoplasm."},
-            {"term": "Krebs Cycle", "definition": "A series of chemical reactions in mitochondria that harvest high-energy electrons via NADH and FADH2."},
-            {"term": "ATP Synthase", "definition": "A rotary enzyme embedded in the inner mitochondrial membrane that synthesizes ATP from ADP and inorganic phosphate."}
-        ],
-        "revision_questions": [
-            {
-                "question": "What is the net yield of ATP and electron carriers from glycolysis alone?",
-                "answer": "Glycolysis uses 2 ATP during its energy investment phase and produces 4 ATP in its payoff phase, resulting in a net yield of 2 ATP (via substrate-level phosphorylation) and 2 NADH molecules per molecule of glucose."
-            },
-            {
-                "question": "Where do each of the three major stages of cellular respiration take place in eukaryotic cells?",
-                "answer": "Glycolysis takes place in the cellular cytoplasm. The Citric Acid (Krebs) Cycle occurs inside the mitochondrial matrix. Oxidative Phosphorylation (the electron transport chain and ATP Synthase) is situated on the inner mitochondrial membrane."
-            },
-            {
-                "question": "How does the electron transport chain create the proton motive force?",
-                "answer": "As high-energy electrons from NADH and FADH2 pass sequentially through complexes I, III, and IV, the energy released from these redox reactions is used to pump hydrogen ions (protons) out of the mitochondrial matrix into the intermembrane space, creating a steep chemical and electrical gradient."
-            },
-            {
-                "question": "Why is oxygen required as the final electron acceptor in aerobic respiration?",
-                "answer": "Oxygen has high electronegativity and sits at the terminus of the electron transport chain. It binds free electrons and protons to form water (H2O). Without oxygen, electron carriers back up, proton pumping ceases, and the cell is forced into anaerobic fermentation with vastly lower ATP yield."
-            },
-            {
-                "question": "What role does ATP Synthase play during oxidative phosphorylation?",
-                "answer": "ATP Synthase acts as a molecular turbine. As protons naturally flow down their concentration gradient from the intermembrane space back into the matrix through ATP Synthase, the mechanical rotation drives the catalytic phosphorylation of ADP and inorganic phosphate into ATP."
-            }
-        ]
-    }
-
-    db.add(Note(
-        lecture_id=lec2.id,
-        title=lec2.title,
-        summary=note2_content["summary"],
-        content=note2_content,
-        version=1
-    ))
-
-
 @app.on_event("startup")
 def on_startup():
     """Ensure database schema is created, validate security secrets, and guard account seeding."""
@@ -241,8 +92,7 @@ def on_startup():
                         is_active=True
                     )
                     db.add(admin_user)
-                student_user = db.query(User).filter(User.email == "regular.student@university.edu").first()
-                if not student_user:
+                if not db.query(User).filter(User.email == "regular.student@university.edu").first():
                     student_user = User(
                         full_name="Regular Student",
                         email="regular.student@university.edu",
@@ -252,10 +102,8 @@ def on_startup():
                         is_active=True
                     )
                     db.add(student_user)
-                    db.flush()
-                seed_demo_lectures_if_needed(db, student_user)
                 db.commit()
-                logger.info("Verified / initialized default demo accounts and starter notes.")
+                logger.info("Verified / initialized default demo accounts.")
     except Exception as exc:
         logger.warning(f"Database startup check notice: {exc}")
 
@@ -381,6 +229,7 @@ def validate_audio_magic_bytes(contents: bytes, extension: str) -> bool:
     elif ext == ".aac":
         return contents[:2] == b"\xff\xf1" or contents[:2] == b"\xff\xf9"
     return False
+    return True
 
 
 # --------------------------------------------------
@@ -763,9 +612,7 @@ def transcribe_lecture(
 @app.post("/generate-notes")
 def create_notes(
     notes_request: NotesRequest,
-    request: Request,
-    current_user: Optional[User] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db)
+    request: Request
 ):
     check_rate_limit(request)
     if not notes_request.transcript.strip():
@@ -779,51 +626,9 @@ def create_notes(
             notes_request.transcript
         )
 
-        lecture_id = None
-        note_id = None
-
-        if current_user:
-            try:
-                lecture_title = notes.get("title", "Lecture Notes")
-                if not lecture_title or not str(lecture_title).strip():
-                    lecture_title = "Pasted Lecture Notes"
-
-                lecture = Lecture(
-                    user_id=current_user.id,
-                    title=str(lecture_title).strip()[:255],
-                    status="completed"
-                )
-                db.add(lecture)
-                db.flush()
-
-                transcript_record = Transcript(
-                    lecture_id=lecture.id,
-                    transcript_text=notes_request.transcript
-                )
-                db.add(transcript_record)
-
-                note = Note(
-                    lecture_id=lecture.id,
-                    title=str(lecture_title).strip()[:255],
-                    summary=notes.get("summary", ""),
-                    content=notes,
-                    version=1
-                )
-                db.add(note)
-                db.commit()
-                db.refresh(lecture)
-                db.refresh(note)
-                lecture_id = lecture.id
-                note_id = note.id
-            except Exception as save_err:
-                db.rollback()
-                logger.warning(f"Could not persist pasted notes to database: {save_err}")
-
         return {
             "message": "Notes generated successfully",
-            "notes": notes,
-            "lecture_id": lecture_id,
-            "note_id": note_id
+            "notes": notes
         }
 
     except ValueError as error:
@@ -966,26 +771,24 @@ def create_and_save_notes(
 
             if isinstance(questions, list):
 
-                for question_item in questions:
-                    if isinstance(question_item, dict):
-                        q_text = str(question_item.get("question", "")).strip()
-                        if not q_text:
-                            continue
-                        q_key = q_text.lower()
-                        if q_key not in seen_questions:
-                            generated["revision_questions"].append(question_item)
-                            seen_questions.add(q_key)
-                    else:
-                        question = str(question_item).strip()
-                        if not question:
-                            continue
-                        question_key = question.lower()
-                        if question_key not in seen_questions:
-                            generated["revision_questions"].append({
-                                "question": question,
-                                "answer": "Refer to the comprehensive lecture notes above for the detailed explanation and analysis."
-                            })
-                            seen_questions.add(question_key)
+                for question in questions:
+
+                    question = str(question).strip()
+
+                    if not question:
+                        continue
+
+                    question_key = question.lower()
+
+                    if question_key not in seen_questions:
+
+                        generated["revision_questions"].append(
+                            question
+                        )
+
+                        seen_questions.add(
+                            question_key
+                        )
 
         # --------------------------------------------------
         # SAVE TO MYSQL
@@ -1097,26 +900,16 @@ def get_all_lectures(
         Lecture.id.desc()
     ).all()
 
-    lectures_data = []
-    for lecture in lectures:
-        latest_note = db.query(Note).filter(
-            Note.lecture_id == lecture.id
-        ).order_by(Note.version.desc()).first()
-        summary = latest_note.summary if (latest_note and latest_note.summary) else ""
-        sections_count = 0
-        if latest_note and isinstance(latest_note.content, dict):
-            sections_count = len(latest_note.content.get("sections", []))
-        lectures_data.append({
-            "id": lecture.id,
-            "title": lecture.title,
-            "status": lecture.status,
-            "created_at": lecture.created_at,
-            "summary": summary,
-            "sections_count": sections_count
-        })
-
     return {
-        "lectures": lectures_data
+        "lectures": [
+            {
+                "id": lecture.id,
+                "title": lecture.title,
+                "status": lecture.status,
+                "created_at": lecture.created_at
+            }
+            for lecture in lectures
+        ]
     }
 
 

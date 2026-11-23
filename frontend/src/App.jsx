@@ -33,11 +33,7 @@ import {
   ArrowUpRight,
   Shield,
   ShieldAlert,
-  LogOut,
-  Eye,
-  EyeOff,
-  ChevronDown,
-  ChevronUp
+  LogOut
 } from "lucide-react";
 import "./App.css";
 import "./Auth.css";
@@ -145,7 +141,6 @@ function formatNotes(data) {
         summary: result,
         sections: [],
         key_points: [],
-        glossary: [],
         revision_questions: [],
       };
     }
@@ -163,7 +158,6 @@ function formatNotes(data) {
           summary: content,
           sections: [],
           key_points: [],
-          glossary: [],
           revision_questions: [],
         };
       }
@@ -175,42 +169,18 @@ function formatNotes(data) {
         summary: "",
         sections: [],
         key_points: [],
-        glossary: [],
         revision_questions: [],
       };
     }
-
-    const rawGlossary = Array.isArray(content.glossary) ? content.glossary : [];
-    const normalizedGlossary = rawGlossary
-      .filter((item) => item && typeof item === "object")
-      .map((item) => ({
-        term: item.term || "Key Concept",
-        definition: item.definition || item.explanation || ""
-      }));
-
-    const rawQuestions = Array.isArray(content.revision_questions)
-      ? content.revision_questions
-      : [];
-    const normalizedQuestions = rawQuestions.map((q) => {
-      if (typeof q === "object" && q !== null) {
-        return {
-          question: q.question || "Practice Question",
-          answer: q.answer || q.explanation || ""
-        };
-      }
-      return {
-        question: String(q),
-        answer: ""
-      };
-    });
 
     return {
       title: content.title || result.title || "Lecture Notes",
       summary: content.summary || result.summary || "",
       sections: Array.isArray(content.sections) ? content.sections : [],
       key_points: Array.isArray(content.key_points) ? content.key_points : [],
-      glossary: normalizedGlossary,
-      revision_questions: normalizedQuestions,
+      revision_questions: Array.isArray(content.revision_questions)
+        ? content.revision_questions
+        : [],
     };
   }
 
@@ -219,7 +189,6 @@ function formatNotes(data) {
     summary: String(result ?? ""),
     sections: [],
     key_points: [],
-    glossary: [],
     revision_questions: [],
   };
 }
@@ -231,8 +200,7 @@ function calculateReadingTime(notes) {
     notes.summary,
     ...notes.sections.map((s) => `${s.heading} ${s.content}`),
     ...notes.key_points,
-    ...(notes.glossary || []).map((g) => `${g.term} ${g.definition}`),
-    ...(notes.revision_questions || []).map((q) => `${q.question} ${q.answer}`)
+    ...notes.revision_questions
   ].join(" ").split(/\s+/).filter(Boolean).length;
   const minutes = Math.max(1, Math.ceil(words / 180));
   return `${minutes} min read`;
@@ -242,43 +210,16 @@ function NotesArticle({ notes, headingLevel = 3, showTitle = true }) {
   const TitleHeading = `h${headingLevel}`;
   const SectionHeading = `h${headingLevel + 1}`;
   const readingTime = calculateReadingTime(notes);
-  const [revealedAnswers, setRevealedAnswers] = useState({});
-  const [copiedSectionIdx, setCopiedSectionIdx] = useState(null);
-
-  const toggleAnswer = (index) => {
-    setRevealedAnswers((prev) => ({
-      ...prev,
-      [index]: !prev[index]
-    }));
-  };
-
-  const copySectionContent = (text, index) => {
-    navigator.clipboard.writeText(text);
-    setCopiedSectionIdx(index);
-    setTimeout(() => setCopiedSectionIdx(null), 2000);
-  };
 
   return (
     <div className="notes-article">
       {showTitle && (
         <div className="notes-header-bar">
           <TitleHeading className="notes-title">{notes.title}</TitleHeading>
-          <div className="notes-meta-pills">
-            <span className="notes-read-time">
-              <Clock size={14} aria-hidden="true" />
-              {readingTime}
-            </span>
-            {notes.sections?.length > 0 && (
-              <span className="notes-meta-pill">
-                {notes.sections.length} {notes.sections.length === 1 ? "Section" : "Sections"}
-              </span>
-            )}
-            {notes.revision_questions?.length > 0 && (
-              <span className="notes-meta-pill accent">
-                {notes.revision_questions.length} Practice Questions
-              </span>
-            )}
-          </div>
+          <span className="notes-read-time">
+            <Clock size={14} aria-hidden="true" />
+            {readingTime}
+          </span>
         </div>
       )}
 
@@ -298,19 +239,7 @@ function NotesArticle({ notes, headingLevel = 3, showTitle = true }) {
             <article className="note-section" key={`${section.heading || "section"}-${index}`}>
               <span className="section-number">{String(index + 1).padStart(2, "0")}</span>
               <div className="note-section-content">
-                <div className="note-section-header">
-                  <SectionHeading>{section.heading || `Section ${index + 1}`}</SectionHeading>
-                  <button
-                    type="button"
-                    className="section-copy-btn"
-                    onClick={() => copySectionContent(section.content, index)}
-                    title="Copy section notes"
-                    aria-label={`Copy section ${index + 1}`}
-                  >
-                    {copiedSectionIdx === index ? <Check size={14} color="var(--success)" /> : <Copy size={14} />}
-                    <span>{copiedSectionIdx === index ? "Copied" : "Copy"}</span>
-                  </button>
-                </div>
+                <SectionHeading>{section.heading || `Section ${index + 1}`}</SectionHeading>
                 <p>{section.content}</p>
               </div>
             </article>
@@ -322,7 +251,7 @@ function NotesArticle({ notes, headingLevel = 3, showTitle = true }) {
         <section className="notes-keypoints" aria-labelledby="key-points-title">
           <SectionHeading id="key-points-title">
             <CheckCircle2 size={18} color="var(--success)" aria-hidden="true" />
-            Key Takeaways & Core Principles
+            Key Takeaways & Core Concepts
           </SectionHeading>
           <ul>
             {notes.key_points.map((point, index) => (
@@ -332,69 +261,17 @@ function NotesArticle({ notes, headingLevel = 3, showTitle = true }) {
         </section>
       )}
 
-      {notes.glossary && notes.glossary.length > 0 && (
-        <section className="notes-glossary" aria-labelledby="glossary-title">
-          <SectionHeading id="glossary-title">
-            <BookOpen size={18} color="var(--accent)" aria-hidden="true" />
-            Glossary & Technical Terminology
-          </SectionHeading>
-          <div className="glossary-grid">
-            {notes.glossary.map((item, index) => (
-              <div className="glossary-card" key={`glossary-${index}`}>
-                <div className="glossary-term-badge">{item.term}</div>
-                <p className="glossary-definition">{item.definition}</p>
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {notes.revision_questions.length > 0 && (
         <section className="notes-questions" aria-labelledby="revision-questions-title">
           <SectionHeading id="revision-questions-title">
             <Brain size={18} color="var(--accent)" aria-hidden="true" />
-            Active-Recall Practice & In-Depth Explanations
+            Check Your Understanding
           </SectionHeading>
-          <div className="questions-container">
-            {notes.revision_questions.map((item, index) => {
-              const qText = item.question || String(item);
-              const aText = item.answer || "";
-              const isRevealed = !!revealedAnswers[index];
-
-              return (
-                <article className="question-card" key={`question-${index}`}>
-                  <div className="question-header">
-                    <span className="question-badge">Q{index + 1}</span>
-                    <p className="question-title">{qText}</p>
-                  </div>
-
-                  {aText ? (
-                    <div className="question-answer-area">
-                      <button
-                        type="button"
-                        className={`answer-toggle-btn${isRevealed ? " active" : ""}`}
-                        onClick={() => toggleAnswer(index)}
-                        aria-expanded={isRevealed}
-                      >
-                        {isRevealed ? <EyeOff size={14} /> : <Eye size={14} />}
-                        <span>{isRevealed ? "Hide Detailed Explanation" : "Reveal Model Answer & Explanation"}</span>
-                      </button>
-
-                      {isRevealed && (
-                        <div className="answer-box">
-                          <div className="answer-box-header">
-                            <CheckCircle2 size={15} color="var(--success)" />
-                            <strong>Model Answer & Conceptual Breakdown</strong>
-                          </div>
-                          <p className="answer-text">{aText}</p>
-                        </div>
-                      )}
-                    </div>
-                  ) : null}
-                </article>
-              );
-            })}
-          </div>
+          <ol>
+            {notes.revision_questions.map((question, index) => (
+              <li key={`question-${index}`}>{question}</li>
+            ))}
+          </ol>
         </section>
       )}
     </div>
@@ -563,26 +440,19 @@ function App() {
     }
   };
 
-  // Fetch all user lectures to keep badge and library synchronised
-  const fetchLectures = async () => {
-    if (!isAuthenticated) return;
-    try {
-      const result = await apiRequest("/lectures");
-      if (Array.isArray(result?.lectures)) {
-        setLectures(result.lectures);
-      }
-    } catch (err) {
-      console.error("Saved notes fetch error:", err);
-    }
-  };
-
   // Load library or deep-linked lecture when routing directly
   useEffect(() => {
     if (!isAuthenticated || isLoading) return;
 
-    fetchLectures();
-
-    if (pathname.startsWith("/lecture/")) {
+    if (pathname === "/lectures" || pathname === "/notes") {
+      apiRequest("/lectures")
+        .then((result) => {
+          if (Array.isArray(result?.lectures)) {
+            setLectures(result.lectures);
+          }
+        })
+        .catch(() => {});
+    } else if (pathname.startsWith("/lecture/")) {
       const lectureId = parseInt(pathname.split("/lecture/")[1], 10);
       if (lectureId && (!selectedLecture || selectedLecture.id !== lectureId)) {
         apiRequest(`/lectures/${lectureId}`)
@@ -708,7 +578,6 @@ function App() {
       setNotes(formatNotes(savedNotes));
       setStatus("Your notes are ready!");
       showToast("Notes generated and saved successfully!");
-      fetchLectures();
     } catch (err) {
       console.error("Audio workflow error:", err);
       setError(err.message || "Failed to generate notes.");
@@ -744,8 +613,7 @@ function App() {
 
       setNotes(formatNotes(result));
       setStatus("Your notes are ready!");
-      showToast("Notes generated and saved successfully!");
-      fetchLectures();
+      showToast("Notes generated successfully!");
     } catch (err) {
       console.error("Transcript workflow error:", err);
       setError(err.message || "Failed to generate notes.");
@@ -1645,66 +1513,6 @@ function App() {
                   )}
                 </section>
               </section>
-
-              {/* Previous Notes & Study Sheets on Dashboard */}
-              {lectures.length > 0 && (
-                <section className="dashboard-recent-notes" aria-labelledby="recent-notes-title">
-                  <div className="recent-notes-header">
-                    <div>
-                      <span className="preview-kicker">Saved in Your Library</span>
-                      <h2 id="recent-notes-title">Recent Study Sheets & Previous Notes</h2>
-                    </div>
-                    <button
-                      type="button"
-                      className="ghost-btn"
-                      onClick={openMyNotes}
-                      style={{ fontSize: "0.85rem", display: "flex", alignItems: "center", gap: "6px" }}
-                    >
-                      View All ({lectures.length})
-                      <ArrowUpRight size={14} />
-                    </button>
-                  </div>
-                  <div className="recent-notes-grid">
-                    {lectures.slice(0, 4).map((lec) => (
-                      <article
-                        key={`recent-${lec.id}`}
-                        className="recent-note-card"
-                        onClick={() => openSavedNote(lec)}
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            openSavedNote(lec);
-                          }
-                        }}
-                      >
-                        <div className="recent-note-badge">
-                          <BookOpen size={15} />
-                          <span>Study Sheet</span>
-                        </div>
-                        <h3 className="recent-note-title">{lec.title || "Untitled Lecture"}</h3>
-                        {lec.summary && (
-                          <p className="recent-note-summary">
-                            {lec.summary.length > 130 ? `${lec.summary.slice(0, 130)}...` : lec.summary}
-                          </p>
-                        )}
-                        <div className="recent-note-footer">
-                          <span className="recent-note-date">
-                            <Clock size={12} />
-                            {new Date(lec.created_at || Date.now()).toLocaleDateString(undefined, {
-                              month: "short",
-                              day: "numeric",
-                              year: "numeric"
-                            })}
-                          </span>
-                          <span className="recent-note-open">Open Notes →</span>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                </section>
-              )}
             </>
           )}
 
@@ -1825,11 +1633,6 @@ function App() {
                         </span>
                       </div>
                       <h3>{lecture.title || "Untitled Lecture"}</h3>
-                      {lecture.summary && (
-                        <p className="lecture-card-summary">
-                          {lecture.summary.length > 130 ? `${lecture.summary.slice(0, 130)}...` : lecture.summary}
-                        </p>
-                      )}
                       <div className="lecture-card-footer">
                         <span>Open Study Sheet</span>
                         <ArrowUpRight size={16} aria-hidden="true" />
