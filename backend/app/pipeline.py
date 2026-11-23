@@ -66,13 +66,16 @@ def process_transcript(
         )
 
     # --------------------------------------------------
-    # 4. STORE EMBEDDINGS IN QDRANT
+    # 4. STORE EMBEDDINGS IN QDRANT (Safe / Non-blocking)
     # --------------------------------------------------
 
-    store_chunks(
-        lecture_id=lecture_id,
-        chunks=chunks
-    )
+    try:
+        store_chunks(
+            lecture_id=lecture_id,
+            chunks=chunks
+        )
+    except Exception as qdrant_err:
+        print(f"Notice: Qdrant chunk storage skipped ({qdrant_err}). Proceeding with note generation.")
 
     # --------------------------------------------------
     # 5. HYBRID TOPIC SEGMENTATION

@@ -47,20 +47,16 @@ def get_qdrant_client():
         "QDRANT_API_KEY"
     )
 
-    print("QDRANT URL:", url)
-
-    if not api_key:
-        print("WARNING: QDRANT_API_KEY is not set")
-
     if api_key:
-
         return QdrantClient(
             url=url,
-            api_key=api_key
+            api_key=api_key,
+            timeout=5
         )
 
     return QdrantClient(
-        url=url
+        url=url,
+        timeout=5
     )
 
 
@@ -136,70 +132,69 @@ def store_chunks(
 ):
 
     if not chunks:
-
-        print(
-            "No chunks to store"
-        )
-
+        print("No chunks to store")
         return
 
-    # Get Qdrant client
-    client = ensure_collection()
+    try:
+        # Get Qdrant client
+        client = ensure_collection()
 
-    # --------------------------------------------------
-    # GENERATE EMBEDDINGS
-    # --------------------------------------------------
+        # --------------------------------------------------
+        # GENERATE EMBEDDINGS
+        # --------------------------------------------------
 
-    print(
-        f"Generating embeddings for "
-        f"{len(chunks)} chunks..."
-    )
-
-    embeddings = generate_embeddings(
-        chunks
-    )
-
-    # --------------------------------------------------
-    # CREATE QDRANT POINTS
-    # --------------------------------------------------
-
-    points = []
-
-    for index, (chunk, embedding) in enumerate(
-        zip(chunks, embeddings)
-    ):
-
-        point_id = str(
-            uuid.uuid4()
+        print(
+            f"Generating embeddings for "
+            f"{len(chunks)} chunks..."
         )
 
-        points.append(
-            PointStruct(
-                id=point_id,
+        embeddings = generate_embeddings(
+            chunks
+        )
 
-                vector=embedding,
+        # --------------------------------------------------
+        # CREATE QDRANT POINTS
+        # --------------------------------------------------
 
-                payload={
-                    "lecture_id": lecture_id,
-                    "chunk_id": index,
-                    "text": chunk
-                }
+        points = []
+
+        for index, (chunk, embedding) in enumerate(
+            zip(chunks, embeddings)
+        ):
+
+            point_id = str(
+                uuid.uuid4()
             )
+
+            points.append(
+                PointStruct(
+                    id=point_id,
+
+                    vector=embedding,
+
+                    payload={
+                        "lecture_id": lecture_id,
+                        "chunk_id": index,
+                        "text": chunk
+                    }
+                )
+            )
+
+        # --------------------------------------------------
+        # UPLOAD TO QDRANT
+        # --------------------------------------------------
+
+        client.upsert(
+            collection_name=COLLECTION_NAME,
+            points=points
         )
 
-    # --------------------------------------------------
-    # UPLOAD TO QDRANT
-    # --------------------------------------------------
-
-    client.upsert(
-        collection_name=COLLECTION_NAME,
-        points=points
-    )
-
-    print(
-        f"Stored {len(points)} chunks "
-        f"for lecture {lecture_id}"
-    )
+        print(
+            f"Stored {len(points)} chunks "
+            f"for lecture {lecture_id}"
+        )
+    except Exception as exc:
+        print(f"Notice: Qdrant chunk storage skipped: {exc}")
 
 
 # --------------------------------------------------

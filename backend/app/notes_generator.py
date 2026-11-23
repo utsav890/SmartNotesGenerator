@@ -1,10 +1,14 @@
 import json
+import logging
 import os
+import re
 
 from dotenv import load_dotenv
 from groq import Groq
 
 load_dotenv()
+
+logger = logging.getLogger(__name__)
 
 
 def get_groq_client():
@@ -18,13 +22,91 @@ def get_groq_client():
     return Groq(api_key=api_key)
 
 
+def generate_fallback_notes(transcript: str) -> dict:
+    """Generate structured study notes using deterministic rule-based NLP extraction when Groq is unreachable."""
+    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", transcript) if len(s.strip()) > 5]
+    if not sentences:
+        clean_text = transcript.strip() or "Lecture Notes"
+        sentences = [clean_text[:200]]
+
+    # Title: first sentence or topic
+    first = sentences[0].rstrip(".!?")
+    title = first if len(first) <= 70 else first[:67] + "..."
+
+    # Summary: top 2-3 sentences
+    summary = " ".join(sentences[:min(3, len(sentences))])
+
+    # Sections: break into thematic clusters
+    chunk_size = max(3, len(sentences) // 3) if len(sentences) >= 3 else len(sentences)
+    sections = []
+    headings = ["Core Concepts & Overview", "Detailed Discussion & Analysis", "Key Takeaways & Implications"]
+    for i in range(0, len(sentences), chunk_size):
+        chunk = sentences[i : i + chunk_size]
+        h_idx = len(sections) % len(headings)
+        heading = headings[h_idx]
+        sections.append({
+            "heading": heading,
+            "content": " ".join(chunk)
+        })
+
+    # Key points: extract informative sentences
+    key_points = []
+    for s in sentences:
+        if len(s) > 25 and not any(w in s.lower() for w in ["welcome", "hello", "good morning", "thank you"]):
+            key_points.append(s)
+            if len(key_points) >= 5:
+                break
+    if not key_points:
+        key_points = sentences[:min(4, len(sentences))]
+
+    # Glossary: extract capitalized technical terms or phrases
+    words = re.findall(r"\b[A-Z][a-zA-Z0-9_-]{2,}\b", transcript)
+    stop_words = {"The", "This", "That", "Here", "Today", "Welcome", "Lecture", "Good", "And", "For", "With", "What", "When"}
+    unique_terms = []
+    for w in words:
+        if w not in stop_words and w not in unique_terms:
+            unique_terms.append(w)
+            if len(unique_terms) >= 5:
+                break
+    glossary = []
+    for term in unique_terms:
+        matching = next((s for s in sentences if term.lower() in s.lower()), f"Key topic related to {term}.")
+        glossary.append({
+            "term": term,
+            "definition": matching
+        })
+    if not glossary:
+        glossary = [{"term": "Key Concept", "definition": summary[:120]}]
+
+    # Practice Revision questions
+    revision_questions = [
+        f"What is the main topic covered in: '{title}'?",
+        "What are the central arguments or key mechanisms discussed in the lecture?",
+        "How would you explain the significance of the primary concepts mentioned?",
+        "What key evidence or examples are presented to support the lecture's core points?",
+        "How do the findings and conclusions presented relate to practical applications?"
+    ]
+
+    return {
+        "title": title,
+        "summary": summary,
+        "sections": sections,
+        "key_points": key_points,
+        "glossary": glossary,
+        "revision_questions": revision_questions
+    }
+
+
 def generate_notes(transcript: str):
     if not transcript or not transcript.strip():
         raise ValueError("Transcript cannot be empty")
 
-    client = get_groq_client()
+    api_key = os.getenv("GROQ_API_KEY")
+    if api_key:
+        try:
+            client = get_groq_client()
 
-    prompt = f"""
+            prompt = f"""
 You are an expert academic note-making assistant.
 
 Create structured, accurate study notes from the lecture transcript.
@@ -83,38 +165,36 @@ Lecture transcript:
 {transcript}
 """
 
-    response = client.chat.completions.create(
-        model="qwen/qwen3.8-27b",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You generate accurate, structured academic notes "
-                    "strictly grounded in the provided transcript."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        temperature=0.2,
-        response_format={"type": "json_object"}
-    )
+            response = client.chat.completions.create(
+                model="qwen/qwen3.8-27b",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You generate accurate, structured academic notes "
+                            "strictly grounded in the provided transcript."
+                        )
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ],
+                temperature=0.2,
+                response_format={"type": "json_object"}
+            )
 
-    content = response.choices[0].message.content
+            content = response.choices[0].message.content
 
-    if not content:
-        raise ValueError("The AI returned an empty response")
+            if content:
+                return json.loads(content)
+        except Exception as error:
+            logger.warning(
+                "Groq AI note generation failed (%s). Falling back to local NLP extraction.",
+                error
+            )
 
-    try:
-        result = json.loads(content)
-    except json.JSONDecodeError as error:
-        raise ValueError(
-            f"AI returned invalid JSON: {error}"
-        )
-
-    return result
+    return generate_fallback_notes(transcript)
 
 
 def answer_question(

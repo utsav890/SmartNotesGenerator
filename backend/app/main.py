@@ -827,11 +827,11 @@ def create_and_save_notes(
 
         db.rollback()
 
-        print("Note generation error:", error)
+        logger.error("Note generation error: %s", error, exc_info=True)
 
         raise HTTPException(
             status_code=502,
-            detail="Note generation or saving failed. Check backend terminal."
+            detail=f"Note generation failed: {error}"
         )
 # --------------------------------------------------
 # RETRIEVE SAVED NOTES
