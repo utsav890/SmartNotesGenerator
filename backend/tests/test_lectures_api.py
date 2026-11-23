@@ -158,3 +158,17 @@ class TestLecturesAPI(unittest.TestCase):
             headers={"Authorization": f"Bearer {self.token_a}"}
         )
         self.assertIn(res.status_code, [400, 404, 405])
+
+    def test_10_mp4_audio_upload_valid_binary_success(self):
+        """Verify valid MP4 video/audio container file with ftyp header uploads successfully."""
+        valid_mp4 = io.BytesIO(b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2mp41" + b"\x00" * 200)
+        res = self.client.post(
+            "/upload-audio",
+            files={"file": ("lecture_recording.mp4", valid_mp4, "video/mp4")},
+            headers={"Authorization": f"Bearer {self.token_a}"}
+        )
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertIn("lecture_id", data)
+        self.assertIn("saved_filename", data)
+        self.assertEqual(data["status"], "uploaded")

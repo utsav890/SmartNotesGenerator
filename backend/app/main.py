@@ -197,8 +197,11 @@ ALLOWED_EXTENSIONS = {
     ".mp3",
     ".wav",
     ".m4a",
+    ".mp4",
     ".ogg",
-    ".webm"
+    ".webm",
+    ".flac",
+    ".aac",
 }
 
 MAX_FILE_SIZE = 50 * 1024 * 1024
@@ -216,11 +219,16 @@ def validate_audio_magic_bytes(contents: bytes, extension: str) -> bool:
         # RIFF....WAVE
         return len(contents) >= 12 and contents[:4] == b"RIFF" and contents[8:12] == b"WAVE"
     elif ext in (".m4a", ".mp4"):
-        return len(contents) >= 8 and (b"ftyp" in contents[:16] or contents[4:8] == b"ftyp")
+        return len(contents) >= 8 and (b"ftyp" in contents[:32] or contents[4:8] in (b"ftyp", b"moov", b"mdat", b"wide"))
     elif ext in (".ogg", ".opus"):
         return contents[:4] == b"OggS"
     elif ext == ".webm":
         return contents[:4] == b"\x1a\x45\xdf\xa3"
+    elif ext == ".flac":
+        return contents[:4] == b"fLaC"
+    elif ext == ".aac":
+        return contents[:2] == b"\xff\xf1" or contents[:2] == b"\xff\xf9"
+    return False
     return True
 
 
