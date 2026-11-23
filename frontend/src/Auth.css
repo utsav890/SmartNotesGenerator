@@ -648,6 +648,31 @@
   box-sizing: border-box;
 }
 
+/* Theme-aware input fields for Security and Account settings */
+.security-page-viewport .auth-input {
+  background-color: var(--surface-elevated, #ffffff);
+  color: var(--text-primary, #0f172a);
+  border: 1px solid var(--border, rgba(0, 0, 0, 0.12));
+}
+
+.security-page-viewport .auth-input:focus {
+  border-color: var(--accent, #6366f1);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+  background-color: var(--surface, #ffffff);
+}
+
+.security-page-viewport .auth-input-action-btn {
+  color: var(--text-muted, #94a3b8);
+}
+
+.security-page-viewport .auth-input-action-btn:hover {
+  color: var(--text-primary, #0f172a);
+}
+
+.security-page-viewport .auth-label {
+  color: var(--text-secondary, #475569);
+}
+
 .security-content-container {
   max-width: 880px;
   margin: 0 auto;
