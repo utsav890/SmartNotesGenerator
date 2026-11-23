@@ -39,6 +39,7 @@ pnpm-debug.log*
 # Local / Generated Data
 # ================================
 data/
+backend/data/
 backend/uploads/
 backend/generated/
 uploads/
