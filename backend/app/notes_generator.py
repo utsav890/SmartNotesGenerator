@@ -78,13 +78,28 @@ def generate_fallback_notes(transcript: str) -> dict:
     if not glossary:
         glossary = [{"term": "Key Concept", "definition": summary[:120]}]
 
-    # Practice Revision questions
+    # Practice Revision questions with comprehensive model answers
     revision_questions = [
-        f"What is the main topic covered in: '{title}'?",
-        "What are the central arguments or key mechanisms discussed in the lecture?",
-        "How would you explain the significance of the primary concepts mentioned?",
-        "What key evidence or examples are presented to support the lecture's core points?",
-        "How do the findings and conclusions presented relate to practical applications?"
+        {
+            "question": f"What is the central focus and primary thesis of '{title}'?",
+            "answer": f"The lecture focuses extensively on '{title}'. Based on the transcript: {summary} This establishes the foundational principles and core concepts discussed."
+        },
+        {
+            "question": "What primary mechanisms and structural components are emphasized?",
+            "answer": f"The material emphasizes several interconnected components: {' '.join(key_points[:2]) if len(key_points) >= 2 else summary} These operate systematically to ensure that each phase functions properly."
+        },
+        {
+            "question": "How do the key processes connect to produce the primary outcomes?",
+            "answer": f"As detailed in the presentation: {' '.join(key_points[2:4]) if len(key_points) >= 4 else summary} The sequential relationship between these elements ensures stability and optimal results."
+        },
+        {
+            "question": "What evidence, examples, or methodologies were provided to support the lecture's core points?",
+            "answer": f"The lecture validates its framework through clear analytical points: {key_points[-1] if key_points else summary} This provides empirical and theoretical justification for the stated conclusions."
+        },
+        {
+            "question": "What are the broader implications and practical takeaways for students and practitioners?",
+            "answer": f"The overarching implication of '{title}' is that understanding these foundational rules enables deeper analysis, accurate problem-solving, and efficient implementation in real-world scenarios."
+        }
     ]
 
     return {

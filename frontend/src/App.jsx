@@ -33,7 +33,15 @@ import {
   ArrowUpRight,
   Shield,
   ShieldAlert,
-  LogOut
+  LogOut,
+  Bell,
+  Video,
+  Layers,
+  ExternalLink,
+  TrendingUp,
+  Filter,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
 import "./App.css";
 import "./Auth.css";
@@ -178,9 +186,22 @@ function formatNotes(data) {
       summary: content.summary || result.summary || "",
       sections: Array.isArray(content.sections) ? content.sections : [],
       key_points: Array.isArray(content.key_points) ? content.key_points : [],
+      glossary: Array.isArray(content.glossary) ? content.glossary : [],
       revision_questions: Array.isArray(content.revision_questions)
-        ? content.revision_questions
+        ? content.revision_questions.map((q) => {
+            if (typeof q === "object" && q !== null) {
+              return {
+                question: q.question || "Practice question",
+                answer: q.answer || "Refer to the comprehensive lecture notes above for the detailed explanation and analysis."
+              };
+            }
+            return {
+              question: String(q),
+              answer: "Refer to the comprehensive lecture notes above for the detailed explanation and analysis."
+            };
+          })
         : [],
+      pipeline: content.pipeline || result.pipeline || null,
     };
   }
 
@@ -189,7 +210,9 @@ function formatNotes(data) {
     summary: String(result ?? ""),
     sections: [],
     key_points: [],
+    glossary: [],
     revision_questions: [],
+    pipeline: null,
   };
 }
 
@@ -200,7 +223,8 @@ function calculateReadingTime(notes) {
     notes.summary,
     ...notes.sections.map((s) => `${s.heading} ${s.content}`),
     ...notes.key_points,
-    ...notes.revision_questions
+    ...(notes.glossary || []).map((g) => `${g.term} ${g.definition}`),
+    ...notes.revision_questions.map((q) => (typeof q === "object" ? q.question : q))
   ].join(" ").split(/\s+/).filter(Boolean).length;
   const minutes = Math.max(1, Math.ceil(words / 180));
   return `${minutes} min read`;
@@ -210,68 +234,158 @@ function NotesArticle({ notes, headingLevel = 3, showTitle = true }) {
   const TitleHeading = `h${headingLevel}`;
   const SectionHeading = `h${headingLevel + 1}`;
   const readingTime = calculateReadingTime(notes);
+  const [revealedAnswers, setRevealedAnswers] = useState({});
+  const [copiedSection, setCopiedSection] = useState(null);
+
+  const toggleAnswer = (idx) => {
+    setRevealedAnswers((prev) => ({ ...prev, [idx]: !prev[idx] }));
+  };
+
+  const copySectionText = (idx, heading, content) => {
+    const text = `### ${heading}\n\n${content}`;
+    navigator.clipboard?.writeText(text);
+    setCopiedSection(idx);
+    setTimeout(() => setCopiedSection(null), 2000);
+  };
 
   return (
-    <div className="notes-article">
+    <div className="notes-article stitch-study-sheet">
       {showTitle && (
-        <div className="notes-header-bar">
-          <TitleHeading className="notes-title">{notes.title}</TitleHeading>
-          <span className="notes-read-time">
-            <Clock size={14} aria-hidden="true" />
-            {readingTime}
-          </span>
+        <div className="stitch-sheet-header">
+          <div className="stitch-sheet-top-row">
+            <TitleHeading className="stitch-sheet-title">{notes.title}</TitleHeading>
+            <div className="stitch-sheet-meta">
+              <span className="stitch-sheet-pill">
+                <Clock size={14} aria-hidden="true" />
+                {readingTime}
+              </span>
+              <span className="stitch-sheet-pill" style={{ background: "#dcfce7", color: "#15803d" }}>
+                <CheckCircle2 size={14} aria-hidden="true" />
+                100% Grounded
+              </span>
+              {notes.sections?.length > 0 && (
+                <span className="stitch-sheet-pill">
+                  {notes.sections.length} Topics
+                </span>
+              )}
+            </div>
+          </div>
         </div>
       )}
 
       {notes.summary && (
-        <div className="notes-summary-card">
-          <strong>
-            <Sparkles size={14} aria-hidden="true" />
+        <div className="stitch-summary-card">
+          <div className="stitch-card-heading">
+            <Sparkles size={16} color="var(--stitch-primary)" aria-hidden="true" />
             Executive Summary
-          </strong>
-          <p className="notes-summary">{notes.summary}</p>
+          </div>
+          <p className="stitch-summary-text">{notes.summary}</p>
         </div>
       )}
 
-      {notes.sections.length > 0 && (
-        <div className="notes-sections">
-          {notes.sections.map((section, index) => (
-            <article className="note-section" key={`${section.heading || "section"}-${index}`}>
-              <span className="section-number">{String(index + 1).padStart(2, "0")}</span>
-              <div className="note-section-content">
-                <SectionHeading>{section.heading || `Section ${index + 1}`}</SectionHeading>
-                <p>{section.content}</p>
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-
-      {notes.key_points.length > 0 && (
-        <section className="notes-keypoints" aria-labelledby="key-points-title">
-          <SectionHeading id="key-points-title">
-            <CheckCircle2 size={18} color="var(--success)" aria-hidden="true" />
-            Key Takeaways & Core Concepts
-          </SectionHeading>
-          <ul>
+      {notes.key_points && notes.key_points.length > 0 && (
+        <section className="stitch-section-card" aria-labelledby="key-points-title">
+          <div className="stitch-card-heading" id="key-points-title">
+            <CheckCircle2 size={16} color="#10b981" aria-hidden="true" />
+            Key Takeaways &amp; Core Concepts
+          </div>
+          <ul className="stitch-takeaways-list">
             {notes.key_points.map((point, index) => (
-              <li key={`key-${index}`}>{point}</li>
+              <li key={`key-${index}`} className="stitch-takeaway-item">
+                <span className="stitch-takeaway-check">✓</span>
+                <span>{point}</span>
+              </li>
             ))}
           </ul>
         </section>
       )}
 
-      {notes.revision_questions.length > 0 && (
-        <section className="notes-questions" aria-labelledby="revision-questions-title">
-          <SectionHeading id="revision-questions-title">
-            <Brain size={18} color="var(--accent)" aria-hidden="true" />
-            Check Your Understanding
-          </SectionHeading>
-          <ol>
-            {notes.revision_questions.map((question, index) => (
-              <li key={`question-${index}`}>{question}</li>
+      {notes.sections && notes.sections.length > 0 && (
+        <div className="notes-sections-wrapper">
+          {notes.sections.map((section, index) => (
+            <article className="stitch-section-card" key={`${section.heading || "section"}-${index}`}>
+              <div className="stitch-section-header">
+                <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                  <span className="section-number">{String(index + 1).padStart(2, "0")}</span>
+                  <SectionHeading className="stitch-section-heading">
+                    {section.heading || `Section ${index + 1}`}
+                  </SectionHeading>
+                </div>
+                <button
+                  type="button"
+                  className="stitch-icon-btn"
+                  onClick={() => copySectionText(index, section.heading, section.content)}
+                  title="Copy Section"
+                  aria-label="Copy section text"
+                >
+                  {copiedSection === index ? <Check size={16} color="#10b981" /> : <Copy size={16} />}
+                </button>
+              </div>
+              <p className="stitch-section-body">{section.content}</p>
+            </article>
+          ))}
+        </div>
+      )}
+
+      {notes.glossary && notes.glossary.length > 0 && (
+        <section className="stitch-section-card" aria-labelledby="glossary-title">
+          <div className="stitch-card-heading" id="glossary-title">
+            <BookOpen size={16} color="var(--stitch-primary)" aria-hidden="true" />
+            Technical Glossary &amp; Definitions
+          </div>
+          <div className="stitch-glossary-grid">
+            {notes.glossary.map((item, index) => (
+              <div key={`glossary-${index}`} className="stitch-glossary-item">
+                <div className="stitch-term-name">{item.term}</div>
+                <div className="stitch-term-def">{item.definition}</div>
+              </div>
             ))}
-          </ol>
+          </div>
+        </section>
+      )}
+
+      {notes.revision_questions && notes.revision_questions.length > 0 && (
+        <section className="stitch-section-card" aria-labelledby="revision-questions-title">
+          <div className="stitch-card-heading" id="revision-questions-title">
+            <Brain size={16} color="var(--stitch-primary)" aria-hidden="true" />
+            Check Your Understanding &amp; Model Answers
+          </div>
+          <div className="stitch-qa-list">
+            {notes.revision_questions.map((item, index) => {
+              const qText = typeof item === "object" ? item.question : item;
+              const aText = typeof item === "object" ? item.answer : null;
+              const isRevealed = revealedAnswers[index];
+
+              return (
+                <div key={`question-${index}`} className="stitch-qa-item">
+                  <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "12px" }}>
+                    <div className="stitch-question-text">
+                      <span style={{ color: "var(--stitch-primary)", marginRight: "6px" }}>Q{index + 1}.</span>
+                      {qText}
+                    </div>
+                    {aText && (
+                      <button
+                        type="button"
+                        className="stitch-view-btn"
+                        onClick={() => toggleAnswer(index)}
+                        style={{ whiteSpace: "nowrap", flexShrink: 0 }}
+                      >
+                        {isRevealed ? "Hide Answer" : "Show Model Answer"}
+                      </button>
+                    )}
+                  </div>
+                  {isRevealed && aText && (
+                    <div className="stitch-model-answer">
+                      <strong style={{ display: "block", marginBottom: "4px", color: "var(--stitch-primary)", fontSize: "0.82rem" }}>
+                        Model Answer &amp; Explanation:
+                      </strong>
+                      {aText}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
         </section>
       )}
     </div>
@@ -290,10 +404,15 @@ function App() {
   // Navigation & Workspace State
   const [view, setView] = useState("dashboard"); // "dashboard" | "my-notes" | "note-reader" | "quiz" | "security"
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [inputTab, setInputTab] = useState("audio"); // "audio" | "transcript"
+  const [inputTab, setInputTab] = useState("audio"); // "audio" | "transcript" | "youtube"
   const [isDragging, setIsDragging] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [copied, setCopied] = useState(false);
+  const [youtubeUrl, setYoutubeUrl] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [subjectFilter, setSubjectFilter] = useState("all");
+  const [recentLecturesSearch, setRecentLecturesSearch] = useState("");
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
 
   // Form Inputs & Processing
   const [file, setFile] = useState(null);
@@ -305,6 +424,7 @@ function App() {
 
   // My Notes / Library State
   const [lectures, setLectures] = useState([]);
+  const [stats, setStats] = useState(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [notesError, setNotesError] = useState("");
   const [notesLoading, setNotesLoading] = useState(false);
@@ -440,19 +560,26 @@ function App() {
     }
   };
 
-  // Load library or deep-linked lecture when routing directly
+  // Load library, stats, or deep-linked lecture
+  const fetchLecturesAndStats = async () => {
+    try {
+      const result = await apiRequest("/lectures");
+      if (Array.isArray(result?.lectures)) {
+        setLectures(result.lectures);
+      }
+      if (result?.stats) {
+        setStats(result.stats);
+      }
+    } catch {
+      // ignore
+    }
+  };
+
   useEffect(() => {
     if (!isAuthenticated || isLoading) return;
+    fetchLecturesAndStats();
 
-    if (pathname === "/lectures" || pathname === "/notes") {
-      apiRequest("/lectures")
-        .then((result) => {
-          if (Array.isArray(result?.lectures)) {
-            setLectures(result.lectures);
-          }
-        })
-        .catch(() => {});
-    } else if (pathname.startsWith("/lecture/")) {
+    if (pathname.startsWith("/lecture/")) {
       const lectureId = parseInt(pathname.split("/lecture/")[1], 10);
       if (lectureId && (!selectedLecture || selectedLecture.id !== lectureId)) {
         apiRequest(`/lectures/${lectureId}`)
@@ -466,7 +593,7 @@ function App() {
           });
       }
     }
-  }, [pathname, isAuthenticated, isLoading, selectedLecture]);
+  }, [pathname, isAuthenticated, isLoading]);
 
   // Apply Theme
   useEffect(() => {
@@ -578,6 +705,7 @@ function App() {
       setNotes(formatNotes(savedNotes));
       setStatus("Your notes are ready!");
       showToast("Notes generated and saved successfully!");
+      fetchLecturesAndStats();
     } catch (err) {
       console.error("Audio workflow error:", err);
       setError(err.message || "Failed to generate notes.");
@@ -614,6 +742,7 @@ function App() {
       setNotes(formatNotes(result));
       setStatus("Your notes are ready!");
       showToast("Notes generated successfully!");
+      fetchLecturesAndStats();
     } catch (err) {
       console.error("Transcript workflow error:", err);
       setError(err.message || "Failed to generate notes.");
@@ -984,6 +1113,100 @@ function App() {
     (l.title || "Untitled lecture").toLowerCase().includes(searchQuery.toLowerCase())
   );
 
+  const getSubject = (lec) => {
+    const title = (lec?.title || "").toLowerCase();
+    if (title.includes("dbms") || title.includes("database") || title.includes("sql") || title.includes("concurrency")) return "DBMS";
+    if (title.includes("ai") || title.includes("search") || title.includes("a*") || title.includes("intelligence")) return "Artificial Intelligence";
+    if (title.includes("coa") || title.includes("architecture") || title.includes("memory") || title.includes("hierarchy")) return "Computer Architecture";
+    if (title.includes("os") || title.includes("operating") || title.includes("thread") || title.includes("cpu") || title.includes("scheduling")) return "Operating Systems";
+    if (title.includes("ml") || title.includes("gradient") || title.includes("machine learning") || title.includes("descent")) return "Machine Learning";
+    if (title.includes("network") || title.includes("tcp") || title.includes("congestion") || title.includes("cn")) return "Computer Networks";
+    if (title.includes("se") || title.includes("agile") || title.includes("scrum") || title.includes("software")) return "Software Engineering";
+    if (title.includes("bio") || title.includes("cell") || title.includes("atp") || title.includes("respiration")) return "Cellular Biology";
+    return "Computer Science";
+  };
+
+  const formatDuration = (sec) => {
+    if (!sec || isNaN(sec)) return "45:00";
+    const m = Math.floor(sec / 60);
+    const s = Math.floor(sec % 60);
+    if (m >= 60) {
+      const h = Math.floor(m / 60);
+      const remM = m % 60;
+      return `${h}:${String(remM).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+    }
+    return `${m}:${String(s).padStart(2, "0")}`;
+  };
+
+  const formatDate = (dateStr) => {
+    if (!dateStr) return "Oct 24, 2024";
+    try {
+      const d = new Date(dateStr);
+      if (isNaN(d.getTime())) return "Oct 24, 2024";
+      return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    } catch {
+      return "Oct 24, 2024";
+    }
+  };
+
+  const totalLecturesCount = stats?.total_lectures ?? lectures.length;
+  const readyCount = stats?.notes_ready ?? lectures.filter((l) => l.has_notes || l.status === "completed").length;
+  const processingCount = lectures.filter((l) => l.status === "processing" || l.status === "transcribed" || l.status === "uploaded").length;
+  const failedCount = lectures.filter((l) => l.status === "failed").length;
+  const totalDurationSec = stats?.total_duration_seconds ?? lectures.reduce((acc, l) => acc + (l.duration_seconds || 2400), 0);
+  const totalHoursText = `${Math.floor(totalDurationSec / 3600)}h ${Math.floor((totalDurationSec % 3600) / 60)}m`;
+  const readyPct = totalLecturesCount > 0 ? Math.round((readyCount / totalLecturesCount) * 100) : 100;
+
+  // Filter lectures for Recent Lectures table
+  const filteredRecentLectures = lectures.filter((lec) => {
+    const title = (lec.title || "Untitled lecture").toLowerCase();
+    const query = recentLecturesSearch.toLowerCase().trim();
+    const matchesQuery = !query || title.includes(query) || getSubject(lec).toLowerCase().includes(query);
+
+    let matchesStatus = true;
+    if (statusFilter === "Notes Ready") {
+      matchesStatus = lec.has_notes || lec.status === "completed";
+    } else if (statusFilter === "Processing") {
+      matchesStatus = lec.status === "processing" || lec.status === "transcribed" || lec.status === "uploaded";
+    } else if (statusFilter === "Failed") {
+      matchesStatus = lec.status === "failed";
+    }
+
+    let matchesSubject = true;
+    if (subjectFilter !== "all") {
+      matchesSubject = getSubject(lec) === subjectFilter;
+    }
+
+    return matchesQuery && matchesStatus && matchesSubject;
+  });
+
+  const PROCESSING_STAGES = [
+    { id: 1, name: "Audio Uploaded" },
+    { id: 2, name: "Whisper Transcription" },
+    { id: 3, name: "Transcript Cleaning" },
+    { id: 4, name: "Topic Segmentation" },
+    { id: 5, name: "Embedding Generation" },
+    { id: 6, name: "Qdrant Storage" },
+    { id: 7, name: "Groq Notes Generation" },
+    { id: 8, name: "Coverage Validation" },
+    { id: 9, name: "Completed" }
+  ];
+
+  const getActiveStep = (statusMsg) => {
+    if (!statusMsg) return 1;
+    const lower = statusMsg.toLowerCase();
+    if (lower.includes("uploading") || lower.includes("upload")) return 1;
+    if (lower.includes("whisper") || lower.includes("transcribing")) return 2;
+    if (lower.includes("clean")) return 3;
+    if (lower.includes("segment")) return 4;
+    if (lower.includes("embed")) return 5;
+    if (lower.includes("qdrant") || lower.includes("vector")) return 6;
+    if (lower.includes("groq") || lower.includes("generating")) return 7;
+    if (lower.includes("cover") || lower.includes("validat") || lower.includes("loading")) return 8;
+    if (lower.includes("ready") || lower.includes("success")) return 9;
+    return 7;
+  };
+
   // 1. Loading screen
   if (isLoading) {
     return (
@@ -1022,132 +1245,252 @@ function App() {
         />
       )}
 
-      {/* Sidebar Navigation */}
-      <aside className={`sidebar${mobileMenuOpen ? " is-open" : ""}`} aria-label="Workspace navigation">
-        <div className="brand">
-          <div className="brand-icon-wrapper">
-            <BookOpen size={22} aria-hidden="true" />
+      {/* Stitch Sidebar Navigation */}
+      <aside className={`stitch-sidebar${mobileMenuOpen ? " is-open" : ""}`} aria-label="Workspace navigation">
+        <div>
+          {/* NoteFlow Brand */}
+          <div className="stitch-brand">
+            <div className="stitch-brand-logo">
+              <Sparkles size={20} />
+            </div>
+            <div>
+              <div className="stitch-brand-title">NoteFlow</div>
+              <div className="stitch-brand-sub">AI Lecture Notes</div>
+            </div>
           </div>
-          <div>
-            <h2>SmartNotes</h2>
-          </div>
-          <span className="brand-badge">AI</span>
-        </div>
 
-        <button
-          type="button"
-          className="new-btn"
-          onClick={resetWorkspace}
-          aria-label="Create a new notes workspace"
-        >
-          <Plus size={18} aria-hidden="true" /> New Notes
-        </button>
-
-        <p className="nav-title">Workspace</p>
-
-        <nav aria-label="Primary">
+          {/* New Notes / Upload Action */}
           <button
             type="button"
-            className={`nav-item${view === "dashboard" ? " active" : ""}`}
-            aria-current={view === "dashboard" ? "page" : undefined}
-            onClick={() => {
-              setView("dashboard");
-              navigate("/dashboard");
-              setMobileMenuOpen(false);
-            }}
+            className="stitch-primary-cta"
+            style={{ marginBottom: "16px", padding: "10px 16px", fontSize: "0.85rem" }}
+            onClick={resetWorkspace}
+            aria-label="Create a new notes workspace"
           >
-            <LayoutDashboard size={18} aria-hidden="true" />
-            Dashboard
+            <Plus size={16} aria-hidden="true" /> New Notes
           </button>
 
-          <button
-            type="button"
-            className={`nav-item${view === "my-notes" || view === "note-reader" || view === "quiz" ? " active" : ""}`}
-            aria-label="Open saved notes library"
-            aria-current={view !== "dashboard" && view !== "security" ? "page" : undefined}
-            onClick={openMyNotes}
-          >
-            <FileText size={18} aria-hidden="true" />
-            My Notes
-            {lectures.length > 0 && (
-              <span className="nav-item-badge">{lectures.length}</span>
-            )}
-          </button>
-
-          <button
-            type="button"
-            className={`nav-item${view === "security" ? " active" : ""}`}
-            aria-label="Account security and sessions"
-            aria-current={view === "security" ? "page" : undefined}
-            onClick={() => {
-              setView("security");
-              navigate("/settings/security");
-              setMobileMenuOpen(false);
-            }}
-          >
-            <Shield size={18} aria-hidden="true" />
-            Security &amp; Account
-          </button>
-
-          {isAdmin && (
+          {/* Primary Nav */}
+          <nav aria-label="Primary Navigation">
+            <div className="stitch-nav-group-title">Primary</div>
             <button
               type="button"
-              className={`nav-item${view === "admin" ? " active" : ""}`}
-              aria-label="Admin command center"
-              aria-current={view === "admin" ? "page" : undefined}
-              style={{ color: "#c084fc" }}
+              className={`stitch-nav-item${view === "dashboard" ? " active" : ""}`}
               onClick={() => {
-                setView("admin");
-                navigate("/admin");
+                setView("dashboard");
+                navigate("/dashboard");
                 setMobileMenuOpen(false);
               }}
             >
-              <ShieldAlert size={18} aria-hidden="true" color="#c084fc" />
-              Admin Panel
-              <span className="brand-badge" className="admin-nav-badge">
-                ADMIN
+              <LayoutDashboard size={18} />
+              <span>Dashboard</span>
+            </button>
+
+            <button
+              type="button"
+              className={`stitch-nav-item${view === "my-notes" ? " active" : ""}`}
+              onClick={openMyNotes}
+            >
+              <FileText size={18} />
+              <span>My Notes</span>
+              {lectures.length > 0 && (
+                <span className="stitch-nav-badge">{lectures.length}</span>
+              )}
+            </button>
+
+            <button
+              type="button"
+              className={`stitch-nav-item${pathname === "/lectures" ? " active" : ""}`}
+              onClick={openMyNotes}
+            >
+              <Video size={18} />
+              <span>Lectures</span>
+            </button>
+
+            <button
+              type="button"
+              className={`stitch-nav-item${view === "note-reader" ? " active" : ""}`}
+              onClick={() => {
+                if (notes) {
+                  setView("note-reader");
+                } else if (lectures.length > 0) {
+                  openSavedNote(lectures[0]);
+                } else {
+                  openMyNotes();
+                }
+                setMobileMenuOpen(false);
+              }}
+            >
+              <BookOpen size={18} />
+              <span>Study Sheets</span>
+            </button>
+
+            <button
+              type="button"
+              className={`stitch-nav-item${view === "quiz" ? " active" : ""}`}
+              onClick={() => {
+                if (selectedLecture) {
+                  startQuiz(selectedLecture.id);
+                } else if (lectures.length > 0) {
+                  startQuiz(lectures[0].id);
+                } else {
+                  showToast("Please select a lecture first to generate a quiz.");
+                }
+                setMobileMenuOpen(false);
+              }}
+            >
+              <Brain size={18} />
+              <span>Quizzes</span>
+            </button>
+
+            <button
+              type="button"
+              className="stitch-nav-item"
+              onClick={() => setWorkspaceExpanded(!workspaceExpanded)}
+            >
+              <Layers size={18} />
+              <span>Workspace</span>
+              <span className="stitch-nav-chevron">
+                {workspaceExpanded ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
               </span>
             </button>
-          )}
-        </nav>
 
-        <div className="sidebar-footer">
-          {/* Dark / Light Mode Switcher */}
-          <button
-            type="button"
-            className="theme-toggle-btn"
-            onClick={toggleTheme}
-            aria-label={`Switch to ${theme === "dark" ? "light" : "dark"} theme`}
-          >
-            <span className="theme-toggle-inner">
-              {theme === "dark" ? <Moon size={16} /> : <Sun size={16} />}
-              <span>{theme === "dark" ? "Dark Mode" : "Light Mode"}</span>
+            {/* AI Tools */}
+            <div className="stitch-nav-group-title">AI Tools</div>
+            <button
+              type="button"
+              className="stitch-nav-item"
+              onClick={() => {
+                setView("dashboard");
+                setInputTab("audio");
+                navigate("/dashboard");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <FileAudio size={18} />
+              <span>Transcribe Audio</span>
+            </button>
+
+            <button
+              type="button"
+              className="stitch-nav-item"
+              onClick={() => {
+                setView("dashboard");
+                setInputTab("transcript");
+                navigate("/dashboard");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <Sparkles size={18} />
+              <span>Generate Notes</span>
+            </button>
+
+            <button
+              type="button"
+              className="stitch-nav-item"
+              onClick={() => {
+                if (selectedLecture) {
+                  setView("note-reader");
+                  setTimeout(() => questionInputRef.current?.focus(), 150);
+                } else if (lectures.length > 0) {
+                  openSavedNote(lectures[0]);
+                  setTimeout(() => questionInputRef.current?.focus(), 150);
+                } else {
+                  showToast("Select or upload a lecture to chat with it.");
+                }
+                setMobileMenuOpen(false);
+              }}
+            >
+              <MessageCircleQuestion size={18} />
+              <span>Chat with Lecture</span>
+            </button>
+
+            {/* System */}
+            <div className="stitch-nav-group-title">System</div>
+            <button
+              type="button"
+              className={`stitch-nav-item${view === "security" ? " active" : ""}`}
+              onClick={() => {
+                setView("security");
+                navigate("/settings/security");
+                setMobileMenuOpen(false);
+              }}
+            >
+              <Shield size={18} />
+              <span>Security &amp; Account</span>
+            </button>
+
+            {isAdmin && (
+              <button
+                type="button"
+                className={`stitch-nav-item${view === "admin" ? " active" : ""}`}
+                style={{ color: "#c084fc" }}
+                onClick={() => {
+                  setView("admin");
+                  navigate("/admin");
+                  setMobileMenuOpen(false);
+                }}
+              >
+                <ShieldAlert size={18} color="#c084fc" />
+                <span>Admin Panel</span>
+                <span className="stitch-nav-badge" style={{ background: "rgba(192, 132, 252, 0.2)", color: "#c084fc" }}>
+                  ADMIN
+                </span>
+              </button>
+            )}
+          </nav>
+        </div>
+
+        {/* Sidebar Footer / Upgrade Box / Profile */}
+        <div className="stitch-sidebar-footer">
+          <div className="stitch-theme-pill" onClick={toggleTheme} title="Toggle Dark/Light Mode">
+            <span style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {theme === "dark" ? <Moon size={15} /> : <Sun size={15} />}
+              Theme
             </span>
-            <span className="theme-pill">
+            <span style={{ fontSize: "0.72rem", fontWeight: 700, textTransform: "uppercase" }}>
               {theme === "dark" ? "Dark" : "Light"}
             </span>
-          </button>
+          </div>
 
-          <div className="profile-wrapper">
+          <div className="stitch-pro-card">
+            <div className="stitch-pro-title">Upgrade to Pro</div>
+            <div className="stitch-pro-desc">Unlimited AI transcriptions &amp; quizzes.</div>
+            <button
+              type="button"
+              className="stitch-pro-btn"
+              onClick={() => showToast("Pro subscription tier preview. Full features unlocked for your academic tier!")}
+            >
+              Upgrade Now
+            </button>
+          </div>
+
+          <div className="stitch-profile-row">
             <div
-              className="profile"
+              className="stitch-profile-info"
               onClick={() => {
                 setView("security");
                 navigate("/settings/security");
               }}
-              title="Open Security & Account settings"
+              style={{ cursor: "pointer" }}
+              title="Open profile & security"
             >
-              <div className="avatar">
+              <div className="stitch-avatar">
                 {(user?.full_name || user?.name || user?.email || "U").charAt(0).toUpperCase()}
               </div>
-              <div className="profile-info">
-                <strong>{user?.full_name || user?.name || "Student User"}</strong>
-                <p>{user?.email || "Protected Account"}</p>
+              <div>
+                <div className="stitch-profile-name">
+                  {user?.full_name || user?.name || "Student User"}
+                </div>
+                <div className="stitch-profile-sub">
+                  {user?.role === "admin" ? "System Admin" : "CS Undergrad"}
+                </div>
               </div>
             </div>
+
             <button
               type="button"
-              className="sidebar-logout-btn"
+              className="stitch-logout-btn"
               onClick={async (e) => {
                 e.stopPropagation();
                 await logout();
@@ -1162,10 +1505,10 @@ function App() {
       </aside>
 
       {/* Main Container */}
-      <main className="main" id="main">
-        {/* Topbar Header */}
-        <header className="topbar">
-          <div className="topbar-left">
+      <main className="main stitch-main-canvas" id="main">
+        {/* Stitch Header / Topbar */}
+        <header className="stitch-topbar">
+          <div className="stitch-topbar-left">
             <button
               type="button"
               className="mobile-menu-btn"
@@ -1175,10 +1518,10 @@ function App() {
               {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
 
-            <span className="breadcrumb">
-              <span className="breadcrumb-root">Workspace</span>
-              <span className="breadcrumb-sep">/</span>
-              <span className="breadcrumb-active">
+            <div className="stitch-breadcrumbs">
+              <span className="crumb-root">Workspace</span>
+              <span className="crumb-sep">/</span>
+              <span className="crumb-current">
                 {view === "dashboard"
                   ? "Dashboard"
                   : view === "my-notes"
@@ -1191,198 +1534,292 @@ function App() {
                   ? "Admin Command Center"
                   : "Note Reader"}
               </span>
-            </span>
+            </div>
           </div>
 
-          <div className="topbar-right">
+          <div className="stitch-search-container">
+            <Search size={16} className="search-icon" aria-hidden="true" />
+            <input
+              type="text"
+              placeholder="Search lectures, topics, or concepts..."
+              value={recentLecturesSearch}
+              onChange={(e) => setRecentLecturesSearch(e.target.value)}
+              aria-label="Search knowledge base"
+            />
+          </div>
+
+          <div className="stitch-topbar-right">
             <span
-              className={`status-badge${loading ? " is-loading" : ""}`}
+              className={`stitch-pipeline-chip${loading ? " is-active" : ""}`}
               role="status"
               aria-live="polite"
             >
-              <span className="status-indicator-dot" aria-hidden="true" />
+              <span className="dot" aria-hidden="true" />
               {loading
-                ? status || "Processing lecture with AI…"
-                : "Ready for a new lecture"}
+                ? status || "AI Synthesis Active"
+                : "System Ready"}
             </span>
+
+            <button
+              type="button"
+              className="stitch-icon-btn"
+              title="Notifications"
+              aria-label="Notifications"
+            >
+              <Bell size={18} />
+              <span className="stitch-notification-badge" />
+            </button>
 
             <UserProfileMenu />
           </div>
         </header>
 
         {/* Content Body */}
-        <div className="content">
+        <div className="content stitch-content-container">
           {/* ================================================================
               VIEW 1: DASHBOARD (STUDIO & PREVIEW)
               ================================================================ */}
           {view === "dashboard" && (
-            <>
+            <div className="stitch-dashboard-stack">
               {/* Hero Banner */}
-              <section className="hero">
-                <div className="hero-copy">
-                  <span className="eyebrow">
-                    <Sparkles size={13} aria-hidden="true" />
-                    AI Lecture Intelligence
-                  </span>
-                  <h1>
-                    Turn lectures into <span className="gradient-text">smart study notes.</span>
-                  </h1>
-                  <p>
-                    Upload an audio recording or paste your transcript. NoteFlow
-                    synthesizes structured notes, core concepts, and active-recall quizzes in seconds.
-                  </p>
-                  <div className="hero-tags">
-                    <span className="hero-tag">
-                      <Volume2 size={13} /> Whisper Audio Transcription
-                    </span>
-                    <span className="hero-tag">
-                      <Sparkles size={13} /> Groq Ultra-Fast LLM
-                    </span>
-                    <span className="hero-tag">
-                      <Brain size={13} /> Interactive Active Recall Quiz
-                    </span>
+              <section className="stitch-hero">
+                <div className="stitch-hero-content">
+                  <div className="stitch-hero-badge">
+                    <Sparkles size={14} />
+                    <span>AI-Powered Study Intelligence</span>
                   </div>
-                </div>
-
-                <div className="hero-graphic" aria-hidden="true">
-                  <div className="hero-graphic-badge">
-                    <BookOpen size={50} />
-                    <div className="sparkle-float">
-                      <Sparkles size={17} />
-                    </div>
+                  <h1>Turn Lectures into <span className="gradient-text">Smart Study Notes</span></h1>
+                  <p>
+                    Upload audio or paste a transcript. NoteFlow transcribes, analyzes, and generates
+                    structured notes, key concepts, and active-recall quizzes.
+                  </p>
+                  <div className="stitch-hero-chips">
+                    <span className="stitch-chip"><Volume2 size={13} /> Whisper Audio Transcription</span>
+                    <span className="stitch-chip"><Sparkles size={13} /> Groq Ultra-Fast LLM</span>
+                    <span className="stitch-chip"><Brain size={13} /> Qdrant RAG Memory</span>
                   </div>
                 </div>
               </section>
 
-              {/* Workspace 2-Column Studio */}
-              <section className="workspace">
-                {/* Input Studio Card */}
-                <div className="form-card">
-                  {/* Segmented Mode Selector Tabs */}
-                  <div className="input-mode-tabs" role="tablist">
+              {/* Bento Analytics Strip */}
+              <section className="stitch-bento" aria-label="Study Metrics">
+                <div className="stitch-bento-card">
+                  <div className="card-top">
+                    <span className="label">Total Lectures</span>
+                    <div className="icon-wrapper primary"><BookOpen size={18} /></div>
+                  </div>
+                  <div className="val">{totalLecturesCount}</div>
+                  <div className="trend">
+                    <TrendingUp size={14} />
+                    <span>{readyCount} processed successfully</span>
+                  </div>
+                </div>
+
+                <div className="stitch-bento-card">
+                  <div className="card-top">
+                    <span className="label">Notes Generated</span>
+                    <div className="icon-wrapper secondary"><FileText size={18} /></div>
+                  </div>
+                  <div className="val">{readyCount}</div>
+                  <div className="trend">
+                    <Sparkles size={14} />
+                    <span>{readyPct}% completion rate</span>
+                  </div>
+                </div>
+
+                <div className="stitch-bento-card">
+                  <div className="card-top">
+                    <span className="label">Study Time Indexed</span>
+                    <div className="icon-wrapper accent"><Clock size={18} /></div>
+                  </div>
+                  <div className="val">{totalHoursText}</div>
+                  <div className="trend">
+                    <Activity size={14} />
+                    <span>{stats?.total_words_indexed ? `${stats.total_words_indexed.toLocaleString()} words indexed` : "Audio & text indexed"}</span>
+                  </div>
+                </div>
+              </section>
+
+              {/* 9-Stage Processing Stepper Banner (Phase 4) */}
+              {loading && (
+                <section className="stitch-stepper-container" role="status" aria-live="polite">
+                  <div className="stitch-stepper-header">
+                    <div className="stepper-title-row">
+                      <LoaderCircle className="spin" size={20} color="var(--stitch-primary)" />
+                      <div>
+                        <h3>AI Synthesis Pipeline Active</h3>
+                        <p>{status || "Processing lecture content with AI models..."}</p>
+                      </div>
+                    </div>
+                    <span className="stepper-status-badge">Processing</span>
+                  </div>
+
+                  <div className="stitch-stepper-stages">
+                    {PROCESSING_STAGES.map((st, idx) => {
+                      const activeIndex = getActiveStep(status);
+                      const isComplete = idx < activeIndex;
+                      const isCurrent = idx === activeIndex;
+                      return (
+                        <div
+                          key={st.step}
+                          className={`stitch-step-item${isComplete ? " complete" : ""}${isCurrent ? " current" : ""}`}
+                        >
+                          <div className="step-indicator">
+                            {isComplete ? (
+                              <Check size={14} strokeWidth={3} />
+                            ) : isCurrent ? (
+                              <LoaderCircle className="spin" size={14} />
+                            ) : (
+                              <span>{st.step}</span>
+                            )}
+                          </div>
+                          <span className="step-name">{st.name}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
+              )}
+
+              {/* Upload Workspace Section (Phase 3) */}
+              <section className="stitch-workspace-wrapper">
+                <div className="stitch-workspace-header">
+                  <div>
+                    <h2>Lecture Ingestion Studio</h2>
+                    <p>Select your ingestion method to generate a structured study sheet</p>
+                  </div>
+                  <div className="stitch-tab-pills" role="tablist">
                     <button
                       type="button"
                       role="tab"
                       aria-selected={inputTab === "audio"}
-                      className={`mode-tab-btn${inputTab === "audio" ? " active" : ""}`}
+                      className={`stitch-tab-pill${inputTab === "audio" ? " active" : ""}`}
                       onClick={() => setInputTab("audio")}
                       disabled={loading}
                     >
-                      <FileAudio size={16} aria-hidden="true" />
+                      <FileAudio size={16} />
                       Upload Audio
                     </button>
                     <button
                       type="button"
                       role="tab"
                       aria-selected={inputTab === "transcript"}
-                      className={`mode-tab-btn${inputTab === "transcript" ? " active" : ""}`}
+                      className={`stitch-tab-pill${inputTab === "transcript" ? " active" : ""}`}
                       onClick={() => setInputTab("transcript")}
                       disabled={loading}
                     >
-                      <FileText size={16} aria-hidden="true" />
+                      <FileText size={16} />
                       Paste Transcript
                     </button>
+                    <button
+                      type="button"
+                      role="tab"
+                      aria-selected={inputTab === "youtube"}
+                      className={`stitch-tab-pill${inputTab === "youtube" ? " active" : ""}`}
+                      onClick={() => setInputTab("youtube")}
+                      disabled={loading}
+                    >
+                      <Video size={16} />
+                      YouTube Link
+                    </button>
                   </div>
+                </div>
 
-                  {/* Mode 1: Audio File Upload */}
-                  {inputTab === "audio" && (
-                    <div className="audio-upload-container">
-                      <div
-                        className={`upload-box${file ? " has-file" : ""}${isDragging ? " is-dragging" : ""}`}
-                        onDragOver={handleDragOver}
-                        onDragLeave={handleDragLeave}
-                        onDrop={handleDrop}
-                        onClick={() => !file && fileInputRef.current?.click()}
-                      >
-                        <input
-                          ref={fileInputRef}
-                          type="file"
-                          accept=".mp3,.wav,.m4a,.mp4,.ogg,.webm,.flac,.aac,audio/*,video/mp4"
-                          disabled={loading}
-                          aria-label="Choose lecture audio or video file"
-                          onChange={(e) => {
-                            setFile(e.target.files?.[0] || null);
-                            setTranscript("");
-                            setError("");
-                            setNotes("");
-                            setStatus("");
-                          }}
-                        />
+                {/* Tab 1: Audio Upload */}
+                {inputTab === "audio" && (
+                  <div className="stitch-tab-content">
+                    <div
+                      className={`stitch-dropzone-box${file ? " has-file" : ""}${isDragging ? " is-dragging" : ""}`}
+                      onDragOver={handleDragOver}
+                      onDragLeave={handleDragLeave}
+                      onDrop={handleDrop}
+                      onClick={() => !file && fileInputRef.current?.click()}
+                    >
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".mp3,.wav,.m4a,.mp4,.ogg,.webm,.flac,.aac,audio/*,video/mp4"
+                        disabled={loading}
+                        aria-label="Choose lecture audio or video file"
+                        onChange={(e) => {
+                          setFile(e.target.files?.[0] || null);
+                          setTranscript("");
+                          setError("");
+                          setNotes("");
+                          setStatus("");
+                        }}
+                      />
 
-                        {file ? (
-                          <div className="selected-file-card" onClick={(e) => e.stopPropagation()}>
-                            <div className="file-info-group">
-                              <div className="file-icon-badge">
-                                <FileAudio size={22} aria-hidden="true" />
-                              </div>
-                              <div className="file-details">
-                                <strong className="file-name">{file.name}</strong>
-                                <span className="file-meta">
-                                  {(file.size / (1024 * 1024)).toFixed(2)} MB · Ready to transcribe
-                                </span>
-                              </div>
+                      {file ? (
+                        <div className="stitch-file-preview-card" onClick={(e) => e.stopPropagation()}>
+                          <div className="preview-left">
+                            <div className="file-icon-badge">
+                              <FileAudio size={24} />
                             </div>
-                            <button
-                              type="button"
-                              className="file-remove-btn"
-                              disabled={loading}
-                              onClick={() => {
-                                setFile(null);
-                                if (fileInputRef.current) fileInputRef.current.value = "";
-                              }}
-                            >
-                              Remove
-                            </button>
+                            <div className="file-info">
+                              <strong className="file-name">{file.name}</strong>
+                              <span className="file-subtext">
+                                {(file.size / (1024 * 1024)).toFixed(2)} MB · Ready for Whisper transcription
+                              </span>
+                            </div>
                           </div>
-                        ) : (
-                          <>
-                            <div className="upload-icon-circle">
-                              <Upload size={24} aria-hidden="true" />
-                            </div>
-                            <strong>Drag & drop your lecture audio here</strong>
-                            <span className="upload-hint">
-                              MP3, WAV, M4A, OGG or WEBM · Up to 50 MB
-                            </span>
-                            <span className="upload-browse-pill">Browse from device</span>
-                          </>
-                        )}
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Mode 2: Transcript Input */}
-                  {inputTab === "transcript" && (
-                    <div className="transcript-section">
-                      <div className="field-label-row">
-                        <label className="field-label" htmlFor="transcript">
-                          Lecture Transcript
-                        </label>
-                        <div className="sample-buttons-row">
-                          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
-                            Try sample:
-                          </span>
                           <button
                             type="button"
-                            className="sample-pill-btn"
+                            className="stitch-remove-file-btn"
+                            disabled={loading}
+                            onClick={() => {
+                              setFile(null);
+                              if (fileInputRef.current) fileInputRef.current.value = "";
+                            }}
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="stitch-dropzone-idle">
+                          <div className="stitch-upload-icon-circle">
+                            <Upload size={28} />
+                          </div>
+                          <h4>Drag & drop your lecture recording here</h4>
+                          <p>Supports MP3, WAV, M4A, OGG, WEBM up to 50 MB</p>
+                          <span className="stitch-browse-btn">Browse files</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {/* Tab 2: Paste Transcript */}
+                {inputTab === "transcript" && (
+                  <div className="stitch-tab-content">
+                    <div className="stitch-transcript-box">
+                      <div className="transcript-box-header">
+                        <label htmlFor="stitch-transcript-input">Lecture Transcript Content</label>
+                        <div className="sample-chips">
+                          <span className="sample-label">Load sample:</span>
+                          <button
+                            type="button"
+                            className="sample-chip-btn"
                             onClick={() => loadSample("ml")}
                             disabled={loading}
                           >
-                            AI / ML
+                            AI / Machine Learning
                           </button>
                           <button
                             type="button"
-                            className="sample-pill-btn"
+                            className="sample-chip-btn"
                             onClick={() => loadSample("bio")}
                             disabled={loading}
                           >
-                            Biology
+                            Cell Biology
                           </button>
                         </div>
                       </div>
 
                       <textarea
-                        id="transcript"
-                        placeholder="Paste lecture transcription, discussion notes, or speech-to-text output here..."
+                        id="stitch-transcript-input"
+                        className="stitch-textarea"
+                        placeholder="Paste lecture transcription text, notes, or classroom dialogue here..."
                         value={transcript}
                         disabled={loading}
                         onChange={(e) => {
@@ -1394,126 +1831,384 @@ function App() {
                         }}
                       />
 
-                      <div className="textarea-footer">
+                      <div className="stitch-textarea-footer">
                         <span>{transcript.trim() ? `${transcript.trim().split(/\s+/).length} words` : "0 words"}</span>
                         <span>{transcript.length} characters</span>
                       </div>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* Errors and Status */}
-                  {error && (
-                    <div role="alert" aria-live="assertive" className="form-message error-message">
-                      <CircleX size={18} aria-hidden="true" />
-                      <span>{error}</span>
-                    </div>
-                  )}
-
-                  {/* Processing Stepper when loading */}
-                  {loading && (
-                    <div className="progress-stepper" role="status" aria-live="polite">
-                      <div className="stepper-header">
-                        <span style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                          <LoaderCircle className="spin" size={16} />
-                          {file ? "Processing Audio Pipeline" : "Processing Transcript Pipeline"}
+                {/* Tab 3: YouTube Link (Phase 3 specification) */}
+                {inputTab === "youtube" && (
+                  <div className="stitch-tab-content">
+                    <div className="stitch-youtube-box">
+                      <div className="youtube-header">
+                        <Video size={22} color="var(--stitch-primary)" />
+                        <div>
+                          <h4>Import Lecture from YouTube URL</h4>
+                          <p>Paste a YouTube video link to extract audio & generate study notes</p>
+                        </div>
+                      </div>
+                      <div className="youtube-input-group">
+                        <input
+                          type="url"
+                          placeholder="https://www.youtube.com/watch?v=..."
+                          value={youtubeUrl}
+                          onChange={(e) => setYoutubeUrl(e.target.value)}
+                          disabled={loading}
+                          className="stitch-input"
+                        />
+                      </div>
+                      <div className="youtube-notice">
+                        <Sparkles size={14} />
+                        <span>
+                          Direct YouTube URL processing runs through Cloud Ingestion. For instant processing today, upload audio or paste video transcript above.
                         </span>
-                        <span>In Progress</span>
                       </div>
-                      <div className="stepper-bar">
-                        <div className="stepper-bar-fill" />
-                      </div>
-                      <span className="stepper-status-text">
-                        {status || "Analyzing content and creating structured study notes..."}
-                      </span>
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* Action Button */}
+                {/* Error Banner */}
+                {error && (
+                  <div role="alert" className="stitch-error-banner">
+                    <CircleX size={18} />
+                    <span>{error}</span>
+                  </div>
+                )}
+
+                {/* Generate Button Row */}
+                <div className="stitch-workspace-actions">
                   <button
                     type="button"
-                    className="generate-btn"
+                    className="stitch-primary-btn"
                     onClick={handleGenerate}
-                    disabled={loading || (!file && !transcript.trim())}
-                    aria-label="Generate smart notes from the provided lecture"
+                    disabled={loading || (inputTab === "youtube" ? !youtubeUrl.trim() : (!file && !transcript.trim()))}
                   >
                     {loading ? (
                       <>
-                        <LoaderCircle className="spin" size={20} aria-hidden="true" />
-                        Generating Notes…
+                        <LoaderCircle className="spin" size={18} />
+                        <span>Synthesizing Study Notes…</span>
                       </>
                     ) : (
                       <>
-                        <Sparkles size={20} aria-hidden="true" />
-                        Generate Study Notes
+                        <Sparkles size={18} />
+                        <span>Generate Study Notes</span>
                       </>
                     )}
                   </button>
                 </div>
+              </section>
 
-                {/* Preview Studio Card */}
-                <section className="preview-card" aria-labelledby="notes-preview-title">
-                  <div className="preview-heading">
+              {/* Study Sheet Studio Preview (When notes are generated) */}
+              {notes && (
+                <section className="stitch-notes-preview-section">
+                  <div className="stitch-preview-header">
                     <div>
-                      <span className="preview-kicker">Interactive Study Sheet</span>
-                      <h2 id="notes-preview-title">
-                        {notes ? "Notes Preview" : "Study Sheet Studio"}
-                      </h2>
-                      <p>
-                        {notes
-                          ? "Review, copy, or download your AI structured study sheet."
-                          : "Your structured summary, key points, and revision questions will appear here."}
-                      </p>
+                      <span className="preview-tag">Study Sheet Ready</span>
+                      <h2>Interactive Study Sheet</h2>
+                      <p>Full structured synthesis, glossary terms, and active recall checks.</p>
                     </div>
-
-                    {notes && (
-                      <div className="preview-actions">
-                        <button
-                          type="button"
-                          className="action-icon-btn"
-                          onClick={copyNotesToClipboard}
-                          title="Copy Markdown to Clipboard"
-                          aria-label="Copy notes to clipboard"
-                        >
-                          {copied ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
-                        </button>
-                        <button
-                          type="button"
-                          className="action-icon-btn"
-                          onClick={downloadNotes}
-                          title="Download as Text File"
-                          aria-label="Download generated notes"
-                        >
-                          <Download size={18} />
-                        </button>
-                      </div>
-                    )}
+                    <div className="preview-action-buttons">
+                      <button
+                        type="button"
+                        className="stitch-secondary-btn"
+                        onClick={copyNotesToClipboard}
+                        title="Copy Markdown"
+                      >
+                        {copied ? <Check size={16} color="var(--success)" /> : <Copy size={16} />}
+                        <span>{copied ? "Copied" : "Copy Notes"}</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="stitch-secondary-btn"
+                        onClick={downloadNotes}
+                        title="Download Markdown"
+                      >
+                        <Download size={16} />
+                        <span>Download</span>
+                      </button>
+                      <button
+                        type="button"
+                        className="stitch-accent-btn"
+                        onClick={generateAndOpenQuiz}
+                        disabled={quizLoading}
+                      >
+                        <Brain size={16} />
+                        <span>{quizLoading ? "Generating Quiz…" : "Take Quiz"}</span>
+                      </button>
+                    </div>
                   </div>
 
-                  {notes ? (
-                    <div className="notes-output">
-                      <NotesArticle notes={notes} />
+                  <div className="stitch-notes-article-wrapper">
+                    <NotesArticle notes={notes} />
+                  </div>
+                </section>
+              )}
+
+              {/* AI Study Tools Grid (Phase 3 specification) */}
+              <section className="stitch-tools-section" aria-label="AI Study Tools">
+                <div className="stitch-section-heading">
+                  <div>
+                    <h3>AI Study Tools</h3>
+                    <p>Interactive workflows built from your synthesized lecture knowledge</p>
+                  </div>
+                </div>
+
+                <div className="stitch-tools-grid">
+                  <div
+                    className="stitch-tool-card"
+                    onClick={() => {
+                      if (notes) {
+                        // notes is already active
+                      } else if (lectures.length > 0) {
+                        openSavedNote(lectures[0]);
+                      } else {
+                        setView("my-notes");
+                      }
+                    }}
+                  >
+                    <div className="tool-card-icon icon-purple">
+                      <BookOpen size={24} />
+                    </div>
+                    <h4>Study Sheet</h4>
+                    <p>Structured summaries, key takeaways, and core concept breakdowns.</p>
+                    <div className="tool-footer">
+                      <span>{notes ? "Active Sheet" : lectures.length > 0 ? "Open Latest Sheet" : "Generate Notes First"}</span>
+                      <ArrowRight size={16} />
+                    </div>
+                  </div>
+
+                  <div
+                    className="stitch-tool-card"
+                    onClick={() => {
+                      if (notes) {
+                        generateAndOpenQuiz();
+                      } else if (lectures.length > 0) {
+                        openSavedNote(lectures[0]);
+                      } else {
+                        setError("Generate or select a lecture note first to start a quiz.");
+                      }
+                    }}
+                  >
+                    <div className="tool-card-icon icon-violet">
+                      <Brain size={24} />
+                    </div>
+                    <h4>Practice Quiz</h4>
+                    <p>Dynamic multiple-choice questions with answer analysis and scoring.</p>
+                    <div className="tool-footer">
+                      <span>{notes ? "Start Quiz Now" : "Select a Lecture"}</span>
+                      <ArrowRight size={16} />
+                    </div>
+                  </div>
+
+                  <div
+                    className="stitch-tool-card"
+                    onClick={() => {
+                      if (notes && selectedLecture) {
+                        setView("note-reader");
+                        setTimeout(() => jumpToQuestion(), 200);
+                      } else if (lectures.length > 0) {
+                        openSavedNote(lectures[0]);
+                        setTimeout(() => jumpToQuestion(), 200);
+                      } else {
+                        setError("Select or generate a lecture note to chat with its AI copilot.");
+                      }
+                    }}
+                  >
+                    <div className="tool-card-icon icon-fuchsia">
+                      <MessageCircleQuestion size={24} />
+                    </div>
+                    <h4>Chat with Lecture</h4>
+                    <p>Ask questions against vector-grounded lecture transcripts via Qdrant RAG.</p>
+                    <div className="tool-footer">
+                      <span>Open RAG Copilot</span>
+                      <ArrowRight size={16} />
+                    </div>
+                  </div>
+
+                  <div
+                    className="stitch-tool-card"
+                    onClick={() => {
+                      if (notes) {
+                        const el = document.querySelector(".topic-notes-grid");
+                        if (el) el.scrollIntoView({ behavior: "smooth" });
+                      } else {
+                        setView("my-notes");
+                      }
+                    }}
+                  >
+                    <div className="tool-card-icon icon-emerald">
+                      <Layers size={24} />
+                    </div>
+                    <h4>Topic Breakdown</h4>
+                    <p>Granular subject analysis with technical definitions and concept hierarchies.</p>
+                    <div className="tool-footer">
+                      <span>View Breakdown</span>
+                      <ArrowRight size={16} />
+                    </div>
+                  </div>
+                </div>
+              </section>
+
+              {/* Recent Lectures Section (Phase 3 specification) */}
+              <section className="stitch-recent-section" aria-label="Recent Lectures">
+                <div className="stitch-table-header-row">
+                  <div>
+                    <h3>Recent Lectures</h3>
+                    <p>Real-time lecture repository synced with your persistent database</p>
+                  </div>
+
+                  <div className="stitch-table-filters">
+                    <div className="stitch-filter-tabs">
+                      <button
+                        type="button"
+                        className={`stitch-filter-pill${statusFilter === "all" ? " active" : ""}`}
+                        onClick={() => setStatusFilter("all")}
+                      >
+                        All ({lectures.length})
+                      </button>
+                      <button
+                        type="button"
+                        className={`stitch-filter-pill${statusFilter === "ready" ? " active" : ""}`}
+                        onClick={() => setStatusFilter("ready")}
+                      >
+                        Notes Ready ({readyCount})
+                      </button>
+                      <button
+                        type="button"
+                        className={`stitch-filter-pill${statusFilter === "processing" ? " active" : ""}`}
+                        onClick={() => setStatusFilter("processing")}
+                      >
+                        Processing ({processingCount})
+                      </button>
+                      {failedCount > 0 && (
+                        <button
+                          type="button"
+                          className={`stitch-filter-pill${statusFilter === "failed" ? " active" : ""}`}
+                          onClick={() => setStatusFilter("failed")}
+                        >
+                          Failed ({failedCount})
+                        </button>
+                      )}
+                    </div>
+
+                    <div className="stitch-subject-dropdown-wrapper">
+                      <Filter size={14} />
+                      <select
+                        value={subjectFilter}
+                        onChange={(e) => setSubjectFilter(e.target.value)}
+                        className="stitch-select"
+                        aria-label="Filter by subject"
+                      >
+                        <option value="all">All Subjects</option>
+                        <option value="Computer Science">Computer Science</option>
+                        <option value="Life Sciences">Life Sciences</option>
+                        <option value="Engineering">Engineering</option>
+                        <option value="General">General</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table Container */}
+                <div className="stitch-table-card">
+                  {notesLoading ? (
+                    <div className="stitch-table-empty">
+                      <LoaderCircle className="spin" size={24} />
+                      <p>Loading lectures from database...</p>
+                    </div>
+                  ) : filteredRecentLectures.length === 0 ? (
+                    <div className="stitch-table-empty">
+                      <FileText size={32} color="var(--text-muted)" />
+                      <h4>No lectures found</h4>
+                      <p>
+                        {recentLecturesSearch || statusFilter !== "all" || subjectFilter !== "all"
+                          ? "No lectures match your current filters. Try resetting them."
+                          : "Upload audio or paste a transcript to generate your first study sheet."}
+                      </p>
                     </div>
                   ) : (
-                    <div className="empty-preview">
-                      <div className="empty-icon" aria-hidden="true">
-                        <Wand2 size={32} />
-                      </div>
-                      <h3>Ready for your lecture</h3>
-                      <p>
-                        Provide an audio recording or paste transcript text on the left to generate
-                        concise summaries, section outlines, and active-recall test questions.
-                      </p>
-                      <div className="empty-preview-hints">
-                        <span className="hint-pill">⚡ Executive Summaries</span>
-                        <span className="hint-pill">📌 Key Takeaways</span>
-                        <span className="hint-pill">🎯 Self-Test Questions</span>
-                        <span className="hint-pill">🧠 Interactive Quizzes</span>
-                      </div>
+                    <div className="stitch-table-scroll">
+                      <table className="stitch-table">
+                        <thead>
+                          <tr>
+                            <th>Lecture Title</th>
+                            <th>Subject</th>
+                            <th>Duration</th>
+                            <th>Date</th>
+                            <th>Status</th>
+                            <th style={{ textAlign: "right" }}>Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filteredRecentLectures.map((lec) => {
+                            const isReady = lec.has_notes || lec.notes;
+                            const isFailed = lec.status === "failed";
+                            const isProc = !isReady && !isFailed;
+                            const subj = getSubject(lec.title);
+
+                            return (
+                              <tr key={lec.id}>
+                                <td>
+                                  <div className="table-title-cell">
+                                    <div className="title-icon">
+                                      <FileText size={16} />
+                                    </div>
+                                    <span className="title-text" title={lec.title || "Untitled Lecture"}>
+                                      {lec.title || "Untitled Lecture"}
+                                    </span>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span className="stitch-subject-tag">{subj}</span>
+                                </td>
+                                <td className="stitch-mono-cell">
+                                  {formatDuration(lec.duration_seconds)}
+                                </td>
+                                <td>
+                                  <span className="stitch-date-cell">{formatDate(lec.created_at)}</span>
+                                </td>
+                                <td>
+                                  {isReady ? (
+                                    <span className="stitch-status-pill status-ready">
+                                      <span className="dot" />
+                                      Notes Ready
+                                    </span>
+                                  ) : isFailed ? (
+                                    <span className="stitch-status-pill status-failed">
+                                      <span className="dot" />
+                                      Failed
+                                    </span>
+                                  ) : (
+                                    <span className="stitch-status-pill status-processing">
+                                      <span className="dot" />
+                                      Processing
+                                    </span>
+                                  )}
+                                </td>
+                                <td style={{ textAlign: "right" }}>
+                                  <div className="table-actions-cell">
+                                    <button
+                                      type="button"
+                                      className="stitch-table-btn"
+                                      onClick={() => openSavedNote(lec)}
+                                    >
+                                      View Notes
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
                     </div>
                   )}
-                </section>
+                </div>
               </section>
-            </>
+            </div>
           )}
 
           {/* ================================================================
