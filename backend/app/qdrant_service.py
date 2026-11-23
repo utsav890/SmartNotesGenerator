@@ -33,10 +33,18 @@ VECTOR_SIZE = 384
 
 
 # --------------------------------------------------
-# QDRANT CLIENT
+# QDRANT CLIENT SINGLETON & COLLECTION CACHE
 # --------------------------------------------------
 
+_client = None
+_collection_ensured = False
+
+
 def get_qdrant_client():
+    global _client
+
+    if _client is not None:
+        return _client
 
     url = os.getenv(
         "QDRANT_URL",
@@ -48,16 +56,18 @@ def get_qdrant_client():
     )
 
     if api_key:
-        return QdrantClient(
+        _client = QdrantClient(
             url=url,
             api_key=api_key,
-            timeout=5
+            timeout=10
+        )
+    else:
+        _client = QdrantClient(
+            url=url,
+            timeout=10
         )
 
-    return QdrantClient(
-        url=url,
-        timeout=5
-    )
+    return _client
 
 
 # --------------------------------------------------
@@ -65,8 +75,12 @@ def get_qdrant_client():
 # --------------------------------------------------
 
 def ensure_collection():
+    global _collection_ensured
 
     client = get_qdrant_client()
+
+    if _collection_ensured:
+        return client
 
     # Get existing collections
     collections = client.get_collections()
@@ -81,7 +95,6 @@ def ensure_collection():
     # --------------------------------------------------
 
     if not exists:
-
         client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
@@ -89,36 +102,24 @@ def ensure_collection():
                 distance=Distance.COSINE
             )
         )
-
-        print(
-            f"Created Qdrant collection: "
-            f"{COLLECTION_NAME}"
-        )
+        print(f"Created Qdrant collection: {COLLECTION_NAME}")
 
     # --------------------------------------------------
     # CREATE lecture_id PAYLOAD INDEX
     # --------------------------------------------------
 
     try:
-
         client.create_payload_index(
             collection_name=COLLECTION_NAME,
             field_name="lecture_id",
             field_schema=PayloadSchemaType.INTEGER
         )
-
-        print(
-            "lecture_id payload index ready"
-        )
-
+        print("lecture_id payload index ready")
     except Exception as e:
+        # Index already created
+        pass
 
-        print(
-            "lecture_id index already exists "
-            "or could not be created:",
-            e
-        )
-
+    _collection_ensured = True
     return client
 
 
