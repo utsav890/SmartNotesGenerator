@@ -2,7 +2,9 @@
 import json
 import logging
 import os
+import threading
 import time
+from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from pathlib import Path
 from uuid import uuid4
@@ -219,15 +221,12 @@ def seed_demo_lectures_if_needed(db: Session, student_user: User):
     ))
 
 
-@app.on_event("startup")
-def on_startup():
-    """Ensure database schema is created, validate security secrets, and guard account seeding."""
-    get_and_validate_jwt_secret()
-
+def _run_background_database_init():
+    """Ensure database schema is created and guard account seeding in a non-blocking thread."""
     try:
+        logger.info("Initializing database schema...")
         Base.metadata.create_all(bind=engine)
 
-        env = os.getenv("ENVIRONMENT", "development").lower()
         seed_demo = os.getenv("ENABLE_DEMO_SEEDING", "true").lower() == "true"
 
         # Seed default accounts for instant evaluation and demo access
@@ -263,7 +262,25 @@ def on_startup():
                     logger.warning(f"Demo lecture seeding notice: {seed_err}")
                     db.rollback()
     except Exception as exc:
-        logger.warning(f"Database startup check notice: {exc}")
+        logger.warning(f"Database background init notice: {exc}")
+
+
+def on_startup():
+    """Validate security secrets immediately and launch background database schema initialization."""
+    get_and_validate_jwt_secret()
+
+    # Offload blocking database operations to background daemon thread so Uvicorn binds port immediately
+    init_thread = threading.Thread(target=_run_background_database_init, daemon=True)
+    init_thread.start()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    on_startup()
+    yield
+
+
+app.router.lifespan_context = lifespan
 
 # --------------------------------------------------
 # CORS CONFIGURATION

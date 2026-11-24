@@ -13,10 +13,13 @@ fi
 PORT="${PORT:-8000}"
 export PORT
 
-# If no arguments provided or command starts with uvicorn / sh running uvicorn, run Uvicorn on 0.0.0.0:$PORT
-if [ "$#" -eq 0 ] || [ "$1" = "uvicorn" ]; then
-  echo "[entrypoint] Starting Uvicorn on 0.0.0.0:${PORT}..."
-  exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers 1
-fi
-
-exec "$@"
+# Catch default CMD, uvicorn invocations, or shell wrappers and guarantee 0.0.0.0:$PORT binding
+case "$*" in
+  ""|uvicorn*|*uvicorn*)
+    echo "[entrypoint] Starting Uvicorn on 0.0.0.0:${PORT}..."
+    exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers 1
+    ;;
+  *)
+    exec "$@"
+    ;;
+esac

@@ -3,14 +3,13 @@ import time
 from functools import lru_cache
 from pathlib import Path
 
-import whisper
-
 logger = logging.getLogger(__name__)
 
 
 @lru_cache(maxsize=1)
 def load_model():
-    # Load the model once and reuse it
+    # Load the model once and reuse it (lazy-imported on first invocation)
+    import whisper
     return whisper.load_model("base")
 
 
