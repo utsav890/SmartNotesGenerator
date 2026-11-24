@@ -78,30 +78,67 @@ export default function NoteReaderView({
           </p>
 
           {lectures && lectures.length > 0 ? (
-            <div className="lecture-selector-grid">
-              {lectures.map((lec) => (
-                <button
-                  key={lec.id}
-                  type="button"
-                  className="lecture-select-item"
-                  onClick={() => openSavedNote(lec)}
+            <>
+              <div className="selector-dropdown-row">
+                <label htmlFor="study-sheet-select" className="selector-dropdown-label">
+                  Quick Select Lecture:
+                </label>
+                <select
+                  id="study-sheet-select"
+                  className="selector-dropdown-input"
+                  defaultValue=""
+                  onChange={(e) => {
+                    const selected = lectures.find((l) => String(l.id) === e.target.value);
+                    if (selected) openSavedNote(selected);
+                  }}
                 >
-                  <div className="item-icon-wrapper">
-                    <FileText size={20} />
-                  </div>
-                  <div className="item-info">
-                    <span className="item-title">{lec.title}</span>
-                    <span className="item-meta">
-                      {lec.audio_format || "Lecture Audio"} • {lec.created_at ? new Date(lec.created_at).toLocaleDateString() : "Saved"}
-                    </span>
-                  </div>
-                  <div className="item-arrow-action">
-                    <span>View Notes</span>
-                    <ArrowRight size={16} />
-                  </div>
+                  <option value="" disabled>Choose a synthesized lecture...</option>
+                  {lectures.map((lec) => (
+                    <option key={lec.id} value={lec.id}>
+                      {lec.title} ({lec.audio_format || "Lecture Audio"})
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="lecture-selector-grid">
+                {lectures.map((lec) => (
+                  <button
+                    key={lec.id}
+                    type="button"
+                    className="lecture-select-item"
+                    onClick={() => openSavedNote(lec)}
+                  >
+                    <div className="item-icon-wrapper">
+                      <FileText size={20} />
+                    </div>
+                    <div className="item-info">
+                      <span className="item-title">{lec.title}</span>
+                      <span className="item-meta">
+                        {lec.audio_format || "Lecture Audio"} • {lec.created_at ? new Date(lec.created_at).toLocaleDateString() : "Saved"}
+                      </span>
+                    </div>
+                    <div className="item-arrow-action">
+                      <span>View Notes</span>
+                      <ArrowRight size={16} />
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              <div className="selector-footer-action">
+                <button
+                  type="button"
+                  className="btn-secondary-link"
+                  onClick={() => {
+                    if (resetWorkspace) resetWorkspace();
+                    if (setView) setView("dashboard");
+                  }}
+                >
+                  <Sparkles size={14} /> Or Ingest a New Lecture
                 </button>
-              ))}
-            </div>
+              </div>
+            </>
           ) : (
             <div className="selector-empty-cta">
               <p>No synthesized lectures found in your library yet.</p>

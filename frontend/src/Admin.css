@@ -173,7 +173,7 @@
   padding: 1.35rem;
   display: flex;
   flex-direction: column;
-  gap: 1rem;
+  gap: 12px;
   box-shadow: var(--shadow-sm);
   transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
 }
@@ -631,4 +631,61 @@
 
 .admin-btn-danger:hover {
   background: var(--danger-hover);
+}
+
+/* --------------------------------------------------------------------------
+   Light Mode Overrides for Admin Command Center
+   -------------------------------------------------------------------------- */
+[data-theme="light"] .admin-viewport {
+  background: var(--bg-app, #f8fafc);
+}
+
+[data-theme="light"] .admin-header h1,
+[data-theme="light"] .admin-card-title,
+[data-theme="light"] .admin-stat-val,
+[data-theme="light"] .user-cell-name,
+[data-theme="light"] .admin-table td {
+  color: var(--text-primary, #0f172a);
+}
+
+[data-theme="light"] .admin-header p,
+[data-theme="light"] .admin-card-desc,
+[data-theme="light"] .admin-stat-label,
+[data-theme="light"] .user-cell-email,
+[data-theme="light"] .admin-table th,
+[data-theme="light"] .admin-stat-sub {
+  color: var(--text-secondary, #475569);
+}
+
+[data-theme="light"] .admin-card,
+[data-theme="light"] .admin-stat-card,
+[data-theme="light"] .admin-table-wrapper {
+  background: var(--bg-surface, #ffffff);
+  border-color: var(--border-subtle, #e2e8f0);
+}
+
+[data-theme="light"] .admin-table th {
+  background: var(--bg-surface-elevated, #f1f5f9);
+  border-bottom-color: var(--border-subtle, #e2e8f0);
+}
+
+[data-theme="light"] .admin-table td {
+  border-bottom-color: var(--border-subtle, #e2e8f0);
+}
+
+[data-theme="light"] .admin-table tbody tr:hover {
+  background: var(--bg-surface-elevated, #f1f5f9);
+}
+
+[data-theme="light"] .promote-input,
+[data-theme="light"] .filter-input,
+[data-theme="light"] .filter-select {
+  background: var(--bg-surface-elevated, #f1f5f9);
+  border-color: var(--border-subtle, #e2e8f0);
+  color: var(--text-primary, #0f172a);
+}
+
+[data-theme="light"] .promote-input::placeholder,
+[data-theme="light"] .filter-input::placeholder {
+  color: var(--text-secondary, #475569);
 }
