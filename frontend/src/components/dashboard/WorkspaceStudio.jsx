@@ -1,7 +1,6 @@
 import {
   FileAudio,
   FileText,
-  Video,
   Upload,
   CircleX,
   LoaderCircle,
@@ -15,8 +14,6 @@ export default function WorkspaceStudio({
   setFile,
   transcript,
   setTranscript,
-  youtubeUrl,
-  setYoutubeUrl,
   isDragging,
   handleDragOver,
   handleDragLeave,
@@ -59,17 +56,6 @@ export default function WorkspaceStudio({
           >
             <FileText size={16} />
             Paste Transcript
-          </button>
-          <button
-            type="button"
-            role="tab"
-            aria-selected={inputTab === "youtube"}
-            className={`stitch-tab-pill${inputTab === "youtube" ? " active" : ""}`}
-            onClick={() => setInputTab("youtube")}
-            disabled={loading}
-          >
-            <Video size={16} />
-            YouTube Link
           </button>
         </div>
       </div>
@@ -200,41 +186,6 @@ export default function WorkspaceStudio({
         </div>
       )}
 
-      {/* Tab 3: YouTube Link */}
-      {inputTab === "youtube" && (
-        <div className="stitch-tab-content">
-          <div className="stitch-youtube-box">
-            <div className="youtube-header">
-              <Video size={22} color="var(--stitch-primary)" />
-              <div>
-                <h4>Import Lecture from YouTube URL</h4>
-                <p>
-                  Paste a YouTube video link to extract audio &amp; generate study
-                  notes
-                </p>
-              </div>
-            </div>
-            <div className="youtube-input-group">
-              <input
-                type="url"
-                placeholder="https://www.youtube.com/watch?v=..."
-                value={youtubeUrl}
-                onChange={(e) => setYoutubeUrl(e.target.value)}
-                disabled={loading}
-                className="stitch-input"
-              />
-            </div>
-            <div className="youtube-notice">
-              <Sparkles size={14} />
-              <span>
-                Direct YouTube URL processing runs through Cloud Ingestion. For
-                instant processing today, upload audio or paste video transcript
-                above.
-              </span>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Error Banner */}
       {error && (
@@ -250,12 +201,7 @@ export default function WorkspaceStudio({
           type="button"
           className="stitch-primary-btn"
           onClick={handleGenerate}
-          disabled={
-            loading ||
-            (inputTab === "youtube"
-              ? !youtubeUrl.trim()
-              : !file && !transcript.trim())
-          }
+          disabled={loading || (!file && !transcript.trim())}
         >
           {loading ? (
             <>

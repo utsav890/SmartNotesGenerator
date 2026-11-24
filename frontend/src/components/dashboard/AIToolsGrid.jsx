@@ -13,7 +13,6 @@ export default function AIToolsGrid({
   generateAndOpenQuiz,
   setView,
   jumpToQuestion,
-  setError,
   selectedLecture,
 }) {
   return (
@@ -79,7 +78,13 @@ export default function AIToolsGrid({
           <h4>Practice Quiz</h4>
           <p>Dynamic multiple-choice questions with answer analysis and scoring.</p>
           <div className="tool-footer">
-            <span>{notes ? "Start Quiz Now" : "Select a Lecture"}</span>
+            <span>
+              {notes
+                ? "Start Quiz Now"
+                : lectures.some((l) => l.status === "completed" || l.has_notes)
+                ? "Quiz Latest Lecture"
+                : "Select a Lecture"}
+            </span>
             <ArrowRight size={16} />
           </div>
         </div>

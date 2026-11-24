@@ -75,14 +75,6 @@ export default function Sidebar({
           </button>
           <button
             type="button"
-            className={`stitch-nav-item${view === "my-notes" ? " active" : ""}`}
-            onClick={() => handleNav("my-notes", openMyNotes)}
-          >
-            <BookOpen size={18} />
-            <span>Lectures</span>
-          </button>
-          <button
-            type="button"
             className={`stitch-nav-item${view === "note-reader" ? " active" : ""}`}
             onClick={() => handleNav("note-reader")}
           >

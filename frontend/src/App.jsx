@@ -143,9 +143,10 @@ function getSubject(lec) {
 }
 
 function formatDuration(sec) {
-  if (!sec || isNaN(sec)) return "45:00";
-  const m = Math.floor(sec / 60);
-  const s = Math.floor(sec % 60);
+  if (sec === null || sec === undefined || sec === "" || isNaN(Number(sec))) return "—";
+  const totalSec = Math.max(0, Math.floor(Number(sec)));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
   if (m >= 60) {
     const h = Math.floor(m / 60);
     const remM = m % 60;
@@ -155,13 +156,13 @@ function formatDuration(sec) {
 }
 
 function formatDate(dateStr) {
-  if (!dateStr) return "Oct 24, 2024";
+  if (!dateStr) return "—";
   try {
     const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return "Oct 24, 2024";
+    if (isNaN(d.getTime())) return "—";
     return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
   } catch {
-    return "Oct 24, 2024";
+    return "—";
   }
 }
 
@@ -181,7 +182,6 @@ function App() {
   const [isDragging, setIsDragging] = useState(false);
   const [toastMessage, setToastMessage] = useState("");
   const [copied, setCopied] = useState(false);
-  const [youtubeUrl, setYoutubeUrl] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [subjectFilter, setSubjectFilter] = useState("all");
   const [recentLecturesSearch, setRecentLecturesSearch] = useState("");
@@ -707,8 +707,13 @@ function App() {
   };
 
   // Generate and open quiz
-  const generateAndOpenQuiz = async () => {
-    if (!selectedLecture || quizLoading) return;
+  const generateAndOpenQuiz = async (lectureArg) => {
+    const targetLecture = lectureArg || selectedLecture;
+    if (!targetLecture || quizLoading) return;
+
+    if (lectureArg) {
+      setSelectedLecture(lectureArg);
+    }
 
     setView("quiz");
     setQuiz(null);
@@ -719,7 +724,7 @@ function App() {
     setQuizSubmitted(false);
 
     try {
-      const result = await apiRequest(`/lectures/${selectedLecture.id}/quiz`, { method: "POST" });
+      const result = await apiRequest(`/lectures/${targetLecture.id}/quiz`, { method: "POST" });
       if (!result || typeof result !== "object") {
         throw new Error("The quiz response was invalid. Try generating a new quiz.");
       }
@@ -944,9 +949,11 @@ function App() {
   const readyCount = stats?.notes_ready ?? lectures.filter((l) => l.has_notes || l.status === "completed").length;
   const processingCount = lectures.filter((l) => l.status === "processing" || l.status === "transcribed" || l.status === "uploaded").length;
   const failedCount = lectures.filter((l) => l.status === "failed").length;
-  const totalDurationSec = stats?.total_duration_seconds ?? lectures.reduce((acc, l) => acc + (l.duration_seconds || 2400), 0);
+  const totalDurationSec =
+    stats?.total_duration_seconds ??
+    lectures.reduce((acc, l) => acc + (Number(l.duration_seconds) || 0), 0);
   const totalHoursText = `${Math.floor(totalDurationSec / 3600)}h ${Math.floor((totalDurationSec % 3600) / 60)}m`;
-  const readyPct = totalLecturesCount > 0 ? Math.round((readyCount / totalLecturesCount) * 100) : 100;
+  const readyPct = totalLecturesCount > 0 ? Math.round((readyCount / totalLecturesCount) * 100) : 0;
 
   const filteredRecentLectures = lectures.filter((lec) => {
     const title = (lec.title || "Untitled lecture").toLowerCase();
@@ -1026,6 +1033,8 @@ function App() {
           status={status}
           recentLecturesSearch={recentLecturesSearch}
           setRecentLecturesSearch={setRecentLecturesSearch}
+          searchQuery={searchQuery}
+          setSearchQuery={setSearchQuery}
         />
 
         {/* Content Body */}
@@ -1087,8 +1096,6 @@ function App() {
                 setFile={setFile}
                 transcript={transcript}
                 setTranscript={setTranscript}
-                youtubeUrl={youtubeUrl}
-                setYoutubeUrl={setYoutubeUrl}
                 isDragging={isDragging}
                 handleDragOver={handleDragOver}
                 handleDragLeave={handleDragLeave}
@@ -1105,35 +1112,35 @@ function App() {
 
               {/* Notes Preview when generated */}
               {notes && (
-                <section className="stitch-notes-preview-section">
-                  <div className="stitch-preview-header">
+                <section className="preview-card">
+                  <div className="preview-heading">
                     <div>
-                      <span className="preview-tag">Study Sheet Ready</span>
+                      <span className="preview-kicker">Study Sheet Ready</span>
                       <h2>Interactive Study Sheet</h2>
                       <p>Full structured synthesis, glossary terms, and active recall checks.</p>
                     </div>
-                    <div className="preview-action-buttons">
+                    <div className="preview-actions">
                       <button
                         type="button"
-                        className="stitch-secondary-btn"
+                        className="secondary-btn"
                         onClick={copyNotesToClipboard}
-                        title="Copy Markdown"
+                        title="Copy as Markdown"
                       >
                         {copied ? <Check size={16} color="var(--success)" /> : <Copy size={16} />}
                         <span>{copied ? "Copied" : "Copy Notes"}</span>
                       </button>
                       <button
                         type="button"
-                        className="stitch-secondary-btn"
+                        className="secondary-btn"
                         onClick={downloadNotes}
-                        title="Download Markdown"
+                        title="Download notes"
                       >
                         <Download size={16} />
                         <span>Download</span>
                       </button>
                       <button
                         type="button"
-                        className="stitch-accent-btn"
+                        className="stitch-primary-btn"
                         onClick={generateAndOpenQuiz}
                         disabled={quizLoading}
                       >
@@ -1157,7 +1164,6 @@ function App() {
                 generateAndOpenQuiz={generateAndOpenQuiz}
                 setView={setView}
                 jumpToQuestion={jumpToQuestion}
-                setError={setError}
                 selectedLecture={selectedLecture}
               />
 

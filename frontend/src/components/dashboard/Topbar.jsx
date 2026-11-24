@@ -9,7 +9,15 @@ export default function Topbar({
   status,
   recentLecturesSearch,
   setRecentLecturesSearch,
+  searchQuery,
+  setSearchQuery,
 }) {
+  const showSearch = view === "dashboard" || view === "my-notes";
+  const searchValue = view === "my-notes" ? searchQuery : recentLecturesSearch;
+  const setSearchValue = view === "my-notes" ? setSearchQuery : setRecentLecturesSearch;
+  const searchPlaceholder =
+    view === "my-notes" ? "Search saved lectures..." : "Search recent lectures...";
+
   return (
     <header className="stitch-topbar">
       <div className="stitch-topbar-left">
@@ -41,16 +49,18 @@ export default function Topbar({
         </div>
       </div>
 
-      <div className="stitch-search-container">
-        <Search size={16} className="search-icon" aria-hidden="true" />
-        <input
-          type="text"
-          placeholder="Search lectures, topics, or concepts..."
-          value={recentLecturesSearch}
-          onChange={(e) => setRecentLecturesSearch(e.target.value)}
-          aria-label="Search knowledge base"
-        />
-      </div>
+      {showSearch && (
+        <div className="stitch-search-container">
+          <Search size={16} className="search-icon" aria-hidden="true" />
+          <input
+            type="text"
+            placeholder={searchPlaceholder}
+            value={searchValue || ""}
+            onChange={(e) => setSearchValue?.(e.target.value)}
+            aria-label={searchPlaceholder}
+          />
+        </div>
+      )}
 
       <div className="stitch-topbar-right">
         <span

@@ -69,10 +69,14 @@ export default function RecentLecturesTable({
               aria-label="Filter by subject"
             >
               <option value="all">All Subjects</option>
-              <option value="Computer Science">Computer Science</option>
-              <option value="Life Sciences">Life Sciences</option>
-              <option value="Engineering">Engineering</option>
-              <option value="General">General</option>
+              {Array.from(new Set(lectures.map((lec) => getSubject(lec))))
+                .filter(Boolean)
+                .sort((a, b) => a.localeCompare(b))
+                .map((subj) => (
+                  <option key={subj} value={subj}>
+                    {subj}
+                  </option>
+                ))}
             </select>
           </div>
         </div>
