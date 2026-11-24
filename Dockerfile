@@ -24,7 +24,8 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENVIRONMENT=production \
-    PORT=8000
+    PORT=8000 \
+    JWT_SECRET=production_default_smartnotes_secure_jwt_secret_key_2026_c2a71bf9e4
 
 WORKDIR /app
 
