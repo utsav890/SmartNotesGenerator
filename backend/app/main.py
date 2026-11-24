@@ -222,8 +222,6 @@ def seed_demo_lectures_if_needed(db: Session, student_user: User):
 @app.on_event("startup")
 def on_startup():
     """Ensure database schema is created, validate security secrets, and guard account seeding."""
-    # Critical security validation: enforce JWT secret strength before doing anything.
-    # Must terminate application startup if secret is missing or weak in production.
     get_and_validate_jwt_secret()
 
     try:
@@ -257,9 +255,13 @@ def on_startup():
                     )
                     db.add(student_user)
                     db.flush()
-                seed_demo_lectures_if_needed(db, student_user)
-                db.commit()
-                logger.info("Verified / initialized default demo accounts and starter notes.")
+                try:
+                    seed_demo_lectures_if_needed(db, student_user)
+                    db.commit()
+                    logger.info("Verified / initialized default demo accounts and starter notes.")
+                except Exception as seed_err:
+                    logger.warning(f"Demo lecture seeding notice: {seed_err}")
+                    db.rollback()
     except Exception as exc:
         logger.warning(f"Database startup check notice: {exc}")
 

@@ -10,11 +10,11 @@ if [ -z "$JWT_SECRET" ]; then
   export JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 fi
 
-# Ensure PORT defaults to 8000 if unset (aligning with Cloud Run container port)
 PORT="${PORT:-8000}"
 export PORT
 
-if [ "$#" -eq 0 ]; then
+# If no arguments provided or command starts with uvicorn / sh running uvicorn, run Uvicorn on 0.0.0.0:$PORT
+if [ "$#" -eq 0 ] || [ "$1" = "uvicorn" ]; then
   echo "[entrypoint] Starting Uvicorn on 0.0.0.0:${PORT}..."
   exec uvicorn app.main:app --host 0.0.0.0 --port "$PORT" --workers 1
 fi
