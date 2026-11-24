@@ -289,9 +289,30 @@ function App() {
     setQuestionError("");
     setConversation([]);
     setQuestion("");
+    setView("note-reader");
+
+    // If lecture is still processing, do not attempt to fetch notes yet; polling will auto-load when done
+    if (
+      lecture.status === "processing" ||
+      lecture.status === "uploaded" ||
+      lecture.status === "transcribed"
+    ) {
+      setNotes("");
+      setNotesLoading(false);
+      setHistoryLoading(false);
+      return;
+    }
+
+    if (lecture.status === "failed") {
+      setNotes("");
+      setNotesError(lecture.error_message || "Lecture synthesis failed.");
+      setNotesLoading(false);
+      setHistoryLoading(false);
+      return;
+    }
+
     setNotesLoading(true);
     setHistoryLoading(true);
-    setView("note-reader");
 
     try {
       const [notesResult, historyResult] = await Promise.allSettled([
@@ -332,6 +353,29 @@ function App() {
     }
   };
 
+  // Retry failed or stuck lecture synthesis
+  const handleRetryLecture = async (lectureId, e) => {
+    if (e && typeof e.stopPropagation === "function") {
+      e.stopPropagation();
+    }
+    try {
+      showToast("Retrying lecture synthesis...", "info");
+      await apiRequest(`/lectures/${lectureId}/retry`, { method: "POST" });
+      await fetchLecturesAndStats();
+      if (selectedLecture && selectedLecture.id === lectureId) {
+        setSelectedLecture((prev) => ({
+          ...prev,
+          status: "processing",
+          error_message: null
+        }));
+        setNotesError("");
+      }
+      showToast("Synthesis retry initiated! Pipeline running in background.", "success");
+    } catch (err) {
+      showToast(err.message || "Failed to retry synthesis.", "error");
+    }
+  };
+
   // Load library, stats, or deep-linked lecture
   const fetchLecturesAndStats = async () => {
     try {
@@ -366,6 +410,65 @@ function App() {
       }
     }
   }, [pathname, isAuthenticated, isLoading]);
+
+  // Polling: background poll every 4s whenever any lecture in library is processing
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+    const hasProcessing = lectures.some(
+      (l) =>
+        l.status === "processing" ||
+        l.status === "uploaded" ||
+        l.status === "transcribed"
+    );
+    if (!hasProcessing) return;
+
+    const intervalId = setInterval(() => {
+      fetchLecturesAndStats();
+    }, 4000);
+
+    return () => clearInterval(intervalId);
+  }, [lectures, isAuthenticated, isLoading]);
+
+  // Polling: active poll every 4s when viewing a lecture in note-reader that is processing
+  useEffect(() => {
+    if (!isAuthenticated || isLoading || view !== "note-reader" || !selectedLecture) return;
+    const isProcessing =
+      selectedLecture.status === "processing" ||
+      selectedLecture.status === "uploaded" ||
+      selectedLecture.status === "transcribed";
+
+    if (!isProcessing) return;
+
+    const intervalId = setInterval(async () => {
+      try {
+        const updated = await apiRequest(`/lectures/${selectedLecture.id}`);
+        if (!updated || !updated.id) return;
+
+        if (
+          updated.status !== selectedLecture.status ||
+          updated.has_notes !== selectedLecture.has_notes
+        ) {
+          setSelectedLecture(updated);
+          if (updated.status === "completed" || updated.has_notes) {
+            const notesResult = await apiRequest(`/lectures/${updated.id}/notes`);
+            const savedNote = Array.isArray(notesResult?.notes) ? notesResult.notes[0] : null;
+            if (savedNote) {
+              setNotes(formatNotes(savedNote));
+              setNotesError("");
+            }
+            fetchLecturesAndStats();
+          } else if (updated.status === "failed") {
+            setNotesError(updated.error_message || "Lecture synthesis failed.");
+            fetchLecturesAndStats();
+          }
+        }
+      } catch {
+        // silent catch on network hiccups
+      }
+    }, 4000);
+
+    return () => clearInterval(intervalId);
+  }, [selectedLecture, view, isAuthenticated, isLoading]);
 
   // Apply Theme
   useEffect(() => {
@@ -1075,6 +1178,7 @@ function App() {
                 formatDate={formatDate}
                 getSubject={getSubject}
                 recentLecturesSearch={recentLecturesSearch}
+                handleRetryLecture={handleRetryLecture}
               />
             </div>
           )}
@@ -1092,6 +1196,7 @@ function App() {
               resetWorkspace={resetWorkspace}
               openSavedNote={openSavedNote}
               openMyNotes={openMyNotes}
+              handleRetryLecture={handleRetryLecture}
             />
           )}
 
@@ -1133,6 +1238,7 @@ function App() {
               lectures={lectures}
               resetWorkspace={resetWorkspace}
               setView={setView}
+              handleRetryLecture={handleRetryLecture}
             />
           )}
 

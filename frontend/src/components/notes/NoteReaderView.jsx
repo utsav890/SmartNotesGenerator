@@ -52,8 +52,9 @@ export default function NoteReaderView({
   lectures = [],
   resetWorkspace,
   setView,
+  handleRetryLecture,
 }) {
-  if (!notesLoading && !notesError && !notes) {
+  if (!selectedLecture && !notesLoading && !notesError && !notes) {
     return (
       <section className="reader-card" aria-label="Study Sheets Selection">
         <button
@@ -159,6 +160,19 @@ export default function NoteReaderView({
     );
   }
 
+  const isProcessing =
+    selectedLecture &&
+    !notes &&
+    (selectedLecture.status === "processing" ||
+      selectedLecture.status === "uploaded" ||
+      selectedLecture.status === "transcribed");
+
+  const isFailed =
+    selectedLecture &&
+    (selectedLecture.status === "failed" || (!notesLoading && !notes && Boolean(notesError)));
+
+  const isReady = Boolean(notes) && !isProcessing && !isFailed;
+
   return (
     <section className="reader-card" aria-labelledby="reader-title">
       <button type="button" className="back-btn" onClick={openMyNotes}>
@@ -184,7 +198,8 @@ export default function NoteReaderView({
             type="button"
             className="reader-quiz-btn"
             onClick={generateAndOpenQuiz}
-            disabled={quizLoading || notesLoading || !notes}
+            disabled={!isReady || quizLoading || notesLoading}
+            style={!isReady ? { opacity: 0.5, cursor: "not-allowed" } : {}}
             aria-busy={quizLoading}
           >
             {quizLoading ? (
@@ -199,7 +214,8 @@ export default function NoteReaderView({
             type="button"
             className="reader-ask-btn"
             onClick={jumpToQuestion}
-            disabled={questionSubmitting || notesLoading || !notes}
+            disabled={!isReady || questionSubmitting || notesLoading}
+            style={!isReady ? { opacity: 0.5, cursor: "not-allowed" } : {}}
             aria-controls="lecture-question"
           >
             <MessageCircleQuestion size={17} aria-hidden="true" />
@@ -212,6 +228,8 @@ export default function NoteReaderView({
             onClick={copyNotesToClipboard}
             title="Copy Markdown"
             aria-label="Copy notes to clipboard"
+            disabled={!isReady}
+            style={!isReady ? { opacity: 0.5, pointerEvents: "none" } : {}}
           >
             {copied ? (
               <Check size={18} color="var(--success)" />
@@ -226,6 +244,8 @@ export default function NoteReaderView({
             onClick={downloadNotes}
             title="Download Text File"
             aria-label="Download notes"
+            disabled={!isReady}
+            style={!isReady ? { opacity: 0.5, pointerEvents: "none" } : {}}
           >
             <Download size={18} />
           </button>
@@ -238,7 +258,7 @@ export default function NoteReaderView({
               setDeleteError("");
               setDeleteDialogOpen(true);
             }}
-            disabled={deletingNotes || notesLoading || !notes}
+            disabled={!isReady || deletingNotes || notesLoading}
           >
             <Trash2 size={16} aria-hidden="true" />
             Delete Notes
@@ -246,7 +266,23 @@ export default function NoteReaderView({
         </div>
       </div>
 
-      {notesLoading && (
+      {isProcessing && (
+        <div className="library-state" role="status">
+          <LoaderCircle
+            className="spin"
+            size={36}
+            color="var(--accent)"
+            aria-hidden="true"
+          />
+          <h2>Synthesizing Study Sheet with AI...</h2>
+          <p>
+            Whisper transcription and Groq analysis are currently active. This page
+            will automatically refresh when the notes are ready.
+          </p>
+        </div>
+      )}
+
+      {!isProcessing && notesLoading && (
         <div className="library-state" role="status">
           <LoaderCircle
             className="spin"
@@ -259,21 +295,27 @@ export default function NoteReaderView({
         </div>
       )}
 
-      {!notesLoading && notesError && (
+      {!isProcessing && !notesLoading && isFailed && (
         <div className="library-state error-state" role="alert">
-          <h2>Couldn’t open this note</h2>
-          <p>{notesError}</p>
-          <button
-            type="button"
-            className="secondary-btn"
-            onClick={() => selectedLecture && openSavedNote(selectedLecture)}
-          >
-            <RotateCcw size={16} /> Try again
-          </button>
+          <h2>Couldn’t generate notes for this lecture</h2>
+          <p>
+            {selectedLecture?.error_message ||
+              notesError ||
+              "An error occurred during lecture processing."}
+          </p>
+          {handleRetryLecture && selectedLecture?.id && (
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => handleRetryLecture(selectedLecture.id)}
+            >
+              <RotateCcw size={16} /> Try again
+            </button>
+          )}
         </div>
       )}
 
-      {!notesLoading && !notesError && notes && (
+      {isReady && (
         <>
           <div className="notes-output reader-output">
             <NotesArticle notes={notes} headingLevel={2} showTitle={false} />

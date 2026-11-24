@@ -4,6 +4,7 @@ import logging
 import os
 import threading
 import time
+import traceback
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from pathlib import Path
@@ -17,7 +18,8 @@ from fastapi import (
     UploadFile,
     File,
     HTTPException,
-    status
+    status,
+    BackgroundTasks
 )
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -222,11 +224,54 @@ def seed_demo_lectures_if_needed(db: Session, student_user: User):
     ))
 
 
+def ensure_lecture_schema_columns(target_engine):
+    """Ensure error_message and updated_at columns exist on lectures table."""
+    try:
+        from sqlalchemy import inspect
+        inspector = inspect(target_engine)
+        if "lectures" in inspector.get_table_names():
+            columns = [c["name"] for c in inspector.get_columns("lectures")]
+            with target_engine.connect() as conn:
+                if "error_message" not in columns:
+                    conn.execute(text("ALTER TABLE lectures ADD COLUMN error_message TEXT"))
+                    conn.commit()
+                    logger.info("Added error_message column to lectures table.")
+                if "updated_at" not in columns:
+                    conn.execute(text("ALTER TABLE lectures ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"))
+                    conn.commit()
+                    logger.info("Added updated_at column to lectures table.")
+    except Exception as col_err:
+        logger.warning(f"Lecture schema column check notice: {col_err}")
+
+
+def recover_stale_processing_lectures(db: Session):
+    """Mark any stale processing lectures older than 10 minutes as failed."""
+    try:
+        from datetime import datetime, timedelta
+        cutoff = datetime.utcnow() - timedelta(minutes=10)
+        stale_lectures = db.query(Lecture).filter(
+            Lecture.status == "processing",
+            Lecture.created_at <= cutoff
+        ).all()
+        for lec in stale_lectures:
+            setattr(lec, "status", "failed")
+            setattr(lec, "error_message", "Processing timed out or server restarted")
+        if stale_lectures:
+            db.commit()
+            logger.info("Recovered %d stale processing lecture(s) -> marked failed.", len(stale_lectures))
+    except Exception as err:
+        logger.warning(f"Stale lecture recovery check notice: {err}")
+
+
 def _run_background_database_init():
     """Ensure database schema is created and guard account seeding in a non-blocking thread."""
     try:
         logger.info("Initializing database schema...")
         Base.metadata.create_all(bind=engine)
+        ensure_lecture_schema_columns(engine)
+
+        with SessionLocal() as recovery_db:
+            recover_stale_processing_lectures(recovery_db)
 
         seed_demo = os.getenv("ENABLE_DEMO_SEEDING", "true").lower() == "true"
 
@@ -713,6 +758,11 @@ def transcribe_lecture(
             detail="You do not have permission to access this lecture."
         )
 
+    # Set status to processing before starting transcription
+    setattr(lecture, "status", "processing")
+    setattr(lecture, "error_message", None)
+    db.commit()
+
     try:
         # Run Whisper transcription
         result = transcribe_audio(str(file_path))
@@ -745,6 +795,7 @@ def transcribe_lecture(
             db.add(transcript_record)
 
         setattr(lecture, "status", "transcribed")
+        setattr(lecture, "error_message", None)
 
         db.commit()
 
@@ -761,22 +812,43 @@ def transcribe_lecture(
             "transcript": transcript_text
         }
 
-    except HTTPException:
+    except HTTPException as http_exc:
+        db.rollback()
+        try:
+            with SessionLocal() as err_db:
+                err_lec = err_db.query(Lecture).filter(Lecture.id == lecture.id).first()
+                if err_lec:
+                    err_lec.status = "failed"
+                    err_lec.error_message = str(http_exc.detail)
+                    err_db.commit()
+        except Exception:
+            pass
         raise
 
     except Exception as error:
         db.rollback()
+        err_msg = str(error)
+        try:
+            with SessionLocal() as err_db:
+                err_lec = err_db.query(Lecture).filter(Lecture.id == lecture.id).first()
+                if err_lec:
+                    err_lec.status = "failed"
+                    err_lec.error_message = err_msg
+                    err_db.commit()
+        except Exception:
+            pass
 
-        logger.exception(
-            "Transcription request failed for lecture_id=%s after %.2f seconds: %s",
+        logger.error(
+            "Transcription request failed for lecture_id=%s after %.2f seconds: %s\n%s",
             lecture.id,
             time.perf_counter() - request_started_at,
-            error
+            error,
+            traceback.format_exc()
         )
 
         raise HTTPException(
             status_code=500,
-            detail="Transcription failed. Check backend terminal."
+            detail=f"Transcription failed: {error}"
         )
 
 
@@ -866,6 +938,134 @@ def create_notes(
         )
 
 
+def run_lecture_synthesis(lecture_id: int, user_id: int):
+    """
+    Unified, robust background synthesis worker:
+    Whisper transcription -> Groq LLM structured notes & quiz -> Qdrant indexing -> MySQL persistence.
+    """
+    logger.info("Beginning synthesis worker for lecture_id=%d (user_id=%d)...", lecture_id, user_id)
+    with SessionLocal() as db:
+        lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
+        if not lecture:
+            logger.error("Lecture %d not found for synthesis worker.", lecture_id)
+            return
+
+        setattr(lecture, "status", "processing")
+        setattr(lecture, "error_message", None)
+        db.commit()
+
+        try:
+            # Stage 1: Transcription
+            transcript_record = db.query(Transcript).filter(Transcript.lecture_id == lecture_id).first()
+            if not transcript_record or not transcript_record.transcript_text or not str(transcript_record.transcript_text).strip():
+                if not lecture.audio_path or not Path(lecture.audio_path).is_file():
+                    raise ValueError("No transcript or audio recording available to synthesize.")
+
+                logger.info("Stage 1/3: Transcribing audio (%s) with Whisper...", lecture.audio_path)
+                trans_result = transcribe_audio(lecture.audio_path)
+                transcript_text = trans_result.get("transcript", "").strip()
+                if not transcript_text:
+                    raise ValueError("No speech detected in audio file.")
+
+                if not transcript_record:
+                    transcript_record = Transcript(
+                        lecture_id=lecture_id,
+                        transcript_text=transcript_text,
+                        language=trans_result.get("language")
+                    )
+                    db.add(transcript_record)
+                else:
+                    transcript_record.transcript_text = transcript_text
+                    transcript_record.language = trans_result.get("language")
+                db.commit()
+
+            # Stage 2: Groq LLM Structured Note Generation & Qdrant Chunks
+            logger.info("Stage 2/3: Generating structured notes and indexing chunks via process_transcript...")
+            result = process_transcript(str(transcript_record.transcript_text), lecture_id=lecture_id)
+            generated_notes = result["notes"]
+
+            generated = {
+                "title": lecture.title,
+                "summary": "",
+                "sections": [],
+                "key_points": [],
+                "glossary": [],
+                "revision_questions": [],
+                "pipeline": {
+                    "segments": result.get("segments", []),
+                    "coverage": result.get("coverage", {})
+                }
+            }
+            seen_glossary_terms = set()
+            seen_questions = set()
+
+            for item in generated_notes:
+                notes = item.get("notes", {})
+                if not isinstance(notes, dict):
+                    continue
+                if not generated["summary"]:
+                    generated["summary"] = notes.get("summary", "")
+                sections = notes.get("sections", [])
+                if isinstance(sections, list):
+                    generated["sections"].extend(sections)
+                key_points = notes.get("key_points", [])
+                if isinstance(key_points, list):
+                    generated["key_points"].extend(key_points)
+                for g in notes.get("glossary", []):
+                    if isinstance(g, dict):
+                        t = str(g.get("term", "")).strip()
+                        if t and t.lower() not in seen_glossary_terms:
+                            generated["glossary"].append(g)
+                            seen_glossary_terms.add(t.lower())
+                for q in notes.get("revision_questions", []):
+                    if isinstance(q, dict):
+                        qt = str(q.get("question", "")).strip()
+                        if qt and qt.lower() not in seen_questions:
+                            generated["revision_questions"].append(q)
+                            seen_questions.add(qt.lower())
+                    elif isinstance(q, str) and q.strip() and q.strip().lower() not in seen_questions:
+                        generated["revision_questions"].append({
+                            "question": q.strip(),
+                            "answer": "Refer to the comprehensive lecture notes above for the detailed explanation and analysis."
+                        })
+                        seen_questions.add(q.strip().lower())
+
+            # Stage 3: MySQL Note Persistence
+            logger.info("Stage 3/3: Persisting note to database...")
+            latest_note = db.query(Note).filter(Note.lecture_id == lecture_id).order_by(Note.version.desc()).first()
+            note = Note(
+                lecture_id=lecture_id,
+                title=generated["title"],
+                summary=generated["summary"],
+                content=generated,
+                version=(latest_note.version + 1) if latest_note else 1
+            )
+            db.add(note)
+            setattr(lecture, "status", "completed")
+            setattr(lecture, "error_message", None)
+            db.commit()
+            logger.info("Successfully completed synthesis pipeline for lecture %d.", lecture_id)
+
+        except Exception as exc:
+            db.rollback()
+            err_msg = str(exc)
+            logger.error(
+                "Synthesis pipeline failed for lecture %d: %s\n%s",
+                lecture_id,
+                err_msg,
+                traceback.format_exc()
+            )
+            try:
+                with SessionLocal() as err_db:
+                    lec = err_db.query(Lecture).filter(Lecture.id == lecture_id).first()
+                    if lec:
+                        lec.status = "failed"
+                        lec.error_message = err_msg
+                        err_db.commit()
+            except Exception as update_err:
+                logger.error("Could not record failed status for lecture %d: %s", lecture_id, update_err)
+
+
 # --------------------------------------------------
 # GENERATE NOTES FROM SAVED TRANSCRIPT
 # AND SAVE NOTES TO MYSQL
@@ -883,12 +1083,20 @@ def create_and_save_notes(
     # Find and verify lecture ownership
     lecture = get_user_lecture(lecture_id, current_user, db)
 
+    # Set status to processing immediately
+    setattr(lecture, "status", "processing")
+    setattr(lecture, "error_message", None)
+    db.commit()
+
     # Find saved transcript
     transcript_record = db.query(Transcript).filter(
         Transcript.lecture_id == lecture_id
     ).first()
 
     if not transcript_record:
+        setattr(lecture, "status", "failed")
+        setattr(lecture, "error_message", "Transcript not found. Transcribe lecture first.")
+        db.commit()
         raise HTTPException(
             status_code=404,
             detail="Transcript not found. Transcribe lecture first."
@@ -1034,6 +1242,7 @@ def create_and_save_notes(
         db.add(note)
 
         setattr(lecture, "status", "completed")
+        setattr(lecture, "error_message", None)
 
         db.commit()
         db.refresh(note)
@@ -1048,13 +1257,65 @@ def create_and_save_notes(
     except Exception as error:
 
         db.rollback()
+        err_str = str(error)
+        try:
+            with SessionLocal() as err_db:
+                err_lec = err_db.query(Lecture).filter(Lecture.id == lecture_id).first()
+                if err_lec:
+                    err_lec.status = "failed"
+                    err_lec.error_message = err_str
+                    err_db.commit()
+        except Exception:
+            pass
 
-        logger.error("Note generation error: %s", error, exc_info=True)
+        logger.error(
+            "Note generation error for lecture_id=%d: %s\n%s",
+            lecture_id,
+            error,
+            traceback.format_exc()
+        )
 
         raise HTTPException(
             status_code=502,
             detail=f"Note generation failed: {error}"
         )
+
+
+# --------------------------------------------------
+# RETRY FAILED OR STUCK LECTURE SYNTHESIS
+# --------------------------------------------------
+
+@app.post("/lectures/{lecture_id}/retry")
+@app.post("/api/lectures/{lecture_id}/retry")
+def retry_lecture_synthesis(
+    lecture_id: int,
+    background_tasks: BackgroundTasks,
+    sync: bool = False,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Re-run synthesis on a failed or stuck lecture."""
+    lecture = get_user_lecture(lecture_id, current_user, db)
+    setattr(lecture, "status", "processing")
+    setattr(lecture, "error_message", None)
+    db.commit()
+
+    if sync:
+        run_lecture_synthesis(lecture_id, current_user.id)
+        db.refresh(lecture)
+        return {
+            "message": "Synthesis retry completed",
+            "lecture_id": lecture.id,
+            "status": lecture.status,
+            "error_message": getattr(lecture, "error_message", None)
+        }
+
+    background_tasks.add_task(run_lecture_synthesis, lecture_id, current_user.id)
+    return {
+        "message": "Synthesis retry initiated",
+        "lecture_id": lecture.id,
+        "status": "processing"
+    }
 # --------------------------------------------------
 # RETRIEVE SAVED NOTES
 # --------------------------------------------------
@@ -1094,6 +1355,7 @@ def get_lecture_notes(
 # --------------------------------------------------
 
 @app.get("/lectures")
+@app.get("/api/lectures")
 def get_all_lectures(
     request: Request,
     current_user: User = Depends(get_current_user),
@@ -1160,7 +1422,8 @@ def get_all_lectures(
             "sections_count": sections_count,
             "has_notes": has_notes,
             "has_quiz": has_quiz,
-            "word_count": word_count
+            "word_count": word_count,
+            "error_message": getattr(lecture, "error_message", None)
         })
 
     stats = {
@@ -1188,13 +1451,17 @@ def get_lecture_detail(
     db: Session = Depends(get_db)
 ):
     lecture = get_user_lecture(lecture_id, current_user, db)
+    latest_note = db.query(Note).filter(Note.lecture_id == lecture.id).first()
+    effective_status = "completed" if latest_note else (lecture.status or "uploaded")
     return {
         "id": lecture.id,
         "title": lecture.title,
-        "status": lecture.status,
+        "status": effective_status,
         "created_at": lecture.created_at,
         "audio_format": lecture.audio_format,
-        "file_size": lecture.file_size
+        "file_size": lecture.file_size,
+        "has_notes": latest_note is not None,
+        "error_message": getattr(lecture, "error_message", None)
     }
 
 

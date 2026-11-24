@@ -21,6 +21,7 @@ export default function MyNotesView({
   resetWorkspace,
   openSavedNote,
   openMyNotes,
+  handleRetryLecture,
 }) {
   return (
     <section className="library-card" aria-labelledby="my-notes-title">
@@ -141,31 +142,65 @@ export default function MyNotesView({
       {/* Lecture Cards Grid */}
       {!notesLoading && !notesError && filteredLectures.length > 0 && (
         <div className="lecture-grid">
-          {filteredLectures.map((lecture) => (
-            <button
-              type="button"
-              className="lecture-card"
-              key={lecture.id}
-              onClick={() => openSavedNote(lecture)}
-            >
-              <div className="lecture-card-header">
-                <div className="lecture-card-icon">
-                  <FileText size={20} aria-hidden="true" />
+          {filteredLectures.map((lecture) => {
+            const isReady = lecture.has_notes || lecture.status === "completed";
+            const isFailed = lecture.status === "failed";
+            const isProcessing = !isReady && !isFailed;
+
+            return (
+              <button
+                type="button"
+                className="lecture-card"
+                key={lecture.id}
+                onClick={() => openSavedNote(lecture)}
+              >
+                <div className="lecture-card-header">
+                  <div className="lecture-card-icon">
+                    <FileText size={20} aria-hidden="true" />
+                  </div>
+                  <span className="lecture-card-date">
+                    <Clock size={13} aria-hidden="true" />
+                    {lecture.created_at
+                      ? new Date(lecture.created_at).toLocaleDateString()
+                      : "Saved lecture"}
+                  </span>
                 </div>
-                <span className="lecture-card-date">
-                  <Clock size={13} aria-hidden="true" />
-                  {lecture.created_at
-                    ? new Date(lecture.created_at).toLocaleDateString()
-                    : "Saved lecture"}
-                </span>
-              </div>
-              <h3>{lecture.title || "Untitled Lecture"}</h3>
-              <div className="lecture-card-footer">
-                <span>Open Study Sheet</span>
-                <ArrowUpRight size={16} aria-hidden="true" />
-              </div>
-            </button>
-          ))}
+                <h3>{lecture.title || "Untitled Lecture"}</h3>
+                {isProcessing ? (
+                  <div
+                    className="lecture-card-footer"
+                    style={{ color: "var(--accent-primary)", display: "flex", alignItems: "center" }}
+                  >
+                    <LoaderCircle size={14} className="spin" style={{ marginRight: 6 }} />
+                    <span>Synthesizing...</span>
+                  </div>
+                ) : isFailed ? (
+                  <div
+                    className="lecture-card-footer"
+                    style={{ color: "var(--danger)", display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                  >
+                    <span>Failed</span>
+                    <button
+                      type="button"
+                      className="stitch-table-btn retry-btn"
+                      style={{ padding: "4px 8px", fontSize: "0.78rem" }}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (handleRetryLecture) handleRetryLecture(lecture.id, e);
+                      }}
+                    >
+                      <RotateCcw size={12} style={{ marginRight: 4 }} /> Retry
+                    </button>
+                  </div>
+                ) : (
+                  <div className="lecture-card-footer">
+                    <span>Open Study Sheet</span>
+                    <ArrowUpRight size={16} aria-hidden="true" />
+                  </div>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
     </section>

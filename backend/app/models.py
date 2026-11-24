@@ -179,9 +179,15 @@ class Lecture(Base):
         nullable=False,
         server_default="uploaded"
     )
+    error_message = Column(Text, nullable=True)
     created_at = Column(
         TIMESTAMP,
         server_default=text("CURRENT_TIMESTAMP")
+    )
+    updated_at = Column(
+        TIMESTAMP,
+        server_default=text("CURRENT_TIMESTAMP"),
+        onupdate=text("CURRENT_TIMESTAMP")
     )
 
     user = relationship(

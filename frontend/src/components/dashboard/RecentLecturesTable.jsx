@@ -1,4 +1,4 @@
-import { FileText, Filter, LoaderCircle } from "lucide-react";
+import { FileText, Filter, LoaderCircle, RotateCcw } from "lucide-react";
 
 export default function RecentLecturesTable({
   lectures,
@@ -16,6 +16,7 @@ export default function RecentLecturesTable({
   formatDate,
   getSubject,
   recentLecturesSearch,
+  handleRetryLecture,
 }) {
   return (
     <section className="stitch-recent-section" aria-label="Recent Lectures">
@@ -109,8 +110,9 @@ export default function RecentLecturesTable({
               </thead>
               <tbody>
                 {filteredRecentLectures.map((lec) => {
-                  const isReady = lec.has_notes || lec.notes;
+                  const isReady = lec.has_notes || lec.notes || lec.status === "completed";
                   const isFailed = lec.status === "failed";
+                  const isProcessing = !isReady && !isFailed;
                   const subj = getSubject(lec);
 
                   return (
@@ -152,20 +154,43 @@ export default function RecentLecturesTable({
                           </span>
                         ) : (
                           <span className="stitch-status-pill status-processing">
-                            <span className="dot" />
-                            Processing
+                            <LoaderCircle size={12} className="spin" style={{ marginRight: 4 }} />
+                            Synthesizing...
                           </span>
                         )}
                       </td>
                       <td style={{ textAlign: "right" }}>
                         <div className="table-actions-cell">
-                          <button
-                            type="button"
-                            className="stitch-table-btn"
-                            onClick={() => openSavedNote(lec)}
-                          >
-                            View Notes
-                          </button>
+                          {isReady ? (
+                            <button
+                              type="button"
+                              className="stitch-table-btn"
+                              onClick={() => openSavedNote(lec)}
+                            >
+                              View Notes
+                            </button>
+                          ) : isFailed ? (
+                            <button
+                              type="button"
+                              className="stitch-table-btn retry-btn"
+                              onClick={(e) => handleRetryLecture && handleRetryLecture(lec.id, e)}
+                            >
+                              <RotateCcw size={12} style={{ marginRight: 4 }} />
+                              Retry
+                            </button>
+                          ) : (
+                            <span
+                              className="table-pending-text"
+                              style={{
+                                fontSize: "0.82rem",
+                                color: "var(--text-muted)",
+                                fontStyle: "italic",
+                                whiteSpace: "nowrap"
+                              }}
+                            >
+                              Synthesizing...
+                            </span>
+                          )}
                         </div>
                       </td>
                     </tr>
