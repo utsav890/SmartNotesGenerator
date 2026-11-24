@@ -30,11 +30,14 @@ export default function AIToolsGrid({
           className="stitch-tool-card"
           onClick={() => {
             if (notes) {
-              // notes is already active
-            } else if (lectures.length > 0) {
-              openSavedNote(lectures[0]);
+              setView("note-reader");
             } else {
-              setView("my-notes");
+              const readyLecture = lectures.find((l) => l.status === "completed" || l.has_notes);
+              if (readyLecture) {
+                openSavedNote(readyLecture);
+              } else {
+                setView("note-reader");
+              }
             }
           }}
         >
@@ -47,9 +50,9 @@ export default function AIToolsGrid({
             <span>
               {notes
                 ? "Active Sheet"
-                : lectures.length > 0
+                : lectures.some((l) => l.status === "completed" || l.has_notes)
                 ? "Open Latest Sheet"
-                : "Generate Notes First"}
+                : "Select or Ingest Lecture"}
             </span>
             <ArrowRight size={16} />
           </div>
@@ -60,10 +63,13 @@ export default function AIToolsGrid({
           onClick={() => {
             if (notes) {
               generateAndOpenQuiz();
-            } else if (lectures.length > 0) {
-              openSavedNote(lectures[0]);
             } else {
-              setError("Generate or select a lecture note first to start a quiz.");
+              const readyLecture = lectures.find((l) => l.status === "completed" || l.has_notes);
+              if (readyLecture) {
+                generateAndOpenQuiz(readyLecture);
+              } else {
+                setView("quiz");
+              }
             }
           }}
         >
@@ -84,11 +90,14 @@ export default function AIToolsGrid({
             if (notes && selectedLecture) {
               setView("note-reader");
               setTimeout(() => jumpToQuestion(), 200);
-            } else if (lectures.length > 0) {
-              openSavedNote(lectures[0]);
-              setTimeout(() => jumpToQuestion(), 200);
             } else {
-              setError("Select or generate a lecture note to chat with its AI copilot.");
+              const readyLecture = lectures.find((l) => l.status === "completed" || l.has_notes);
+              if (readyLecture) {
+                openSavedNote(readyLecture);
+                setTimeout(() => jumpToQuestion(), 250);
+              } else {
+                setView("note-reader");
+              }
             }
           }}
         >
@@ -107,10 +116,14 @@ export default function AIToolsGrid({
           className="stitch-tool-card"
           onClick={() => {
             if (notes) {
-              const el = document.querySelector(".topic-notes-grid");
-              if (el) el.scrollIntoView({ behavior: "smooth" });
+              setView("note-reader");
             } else {
-              setView("my-notes");
+              const readyLecture = lectures.find((l) => l.status === "completed" || l.has_notes);
+              if (readyLecture) {
+                openSavedNote(readyLecture);
+              } else {
+                setView("my-notes");
+              }
             }
           }}
         >
