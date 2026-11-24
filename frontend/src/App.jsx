@@ -1040,21 +1040,21 @@ function App() {
                     <Sparkles size={14} />
                     <span>AI-Powered Study Intelligence</span>
                   </div>
-                  <h1>
+                  <h1 className="stitch-hero-title">
                     Turn Lectures into <span className="gradient-text">Smart Study Notes</span>
                   </h1>
-                  <p>
+                  <p className="stitch-hero-desc">
                     Upload audio or paste a transcript. NoteFlow transcribes, analyzes, and generates
                     structured notes, key concepts, and active-recall quizzes.
                   </p>
-                  <div className="stitch-hero-chips">
-                    <span className="stitch-chip">
+                  <div className="stitch-hero-badges stitch-hero-chips">
+                    <span className="stitch-chip stitch-hero-badge">
                       <Volume2 size={13} /> Whisper Audio Transcription
                     </span>
-                    <span className="stitch-chip">
+                    <span className="stitch-chip stitch-hero-badge">
                       <Sparkles size={13} /> Groq Ultra-Fast LLM
                     </span>
-                    <span className="stitch-chip">
+                    <span className="stitch-chip stitch-hero-badge">
                       <Brain size={13} /> Qdrant RAG Memory
                     </span>
                   </div>

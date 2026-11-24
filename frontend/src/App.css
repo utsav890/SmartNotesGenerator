@@ -2109,10 +2109,16 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
    Stitch Hero Section
    -------------------------------------------------------------------------- */
 .stitch-hero {
-  padding: 24px 0 16px;
+  padding: 16px 0 20px;
   display: flex;
   flex-direction: column;
   gap: 12px;
+}
+
+.stitch-hero-content {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .stitch-hero-eyebrow {
@@ -2123,50 +2129,56 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.06em;
-  color: var(--stitch-primary);
+  color: var(--accent-primary);
 }
 
-.stitch-hero-title {
-  font-size: 2rem;
-  font-weight: 750;
+.stitch-hero-title,
+.stitch-hero h1 {
+  font-family: var(--font-display, "Plus Jakarta Sans", sans-serif);
+  font-size: clamp(1.85rem, 2.8vw, 2.35rem);
+  font-weight: 800;
   letter-spacing: -0.025em;
-  color: var(--stitch-on-surface);
-  line-height: 1.18;
-  margin: 0;
+  color: var(--text-primary);
+  line-height: 1.2;
+  margin: 4px 0 0;
 }
 
-.stitch-hero-title .gradient-text {
-  background: var(--stitch-gradient);
+.stitch-hero-title .gradient-text,
+.stitch-hero h1 .gradient-text {
+  background: linear-gradient(135deg, #6366f1 0%, #8b5cf6 50%, #ec4899 100%);
   -webkit-background-clip: text;
   -webkit-text-fill-color: transparent;
 }
 
-.stitch-hero-desc {
+.stitch-hero-desc,
+.stitch-hero p {
   font-size: 0.95rem;
-  color: var(--stitch-on-surface-variant);
-  max-width: 650px;
+  color: var(--text-secondary);
+  max-width: 680px;
   line-height: 1.55;
   margin: 0;
 }
 
-.stitch-hero-badges {
+.stitch-hero-badges,
+.stitch-hero-chips {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 10px;
   margin-top: 4px;
 }
 
-.stitch-hero-badge {
+.stitch-hero-badge,
+.stitch-chip {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
+  padding: 5px 12px;
   border-radius: 9999px;
-  font-size: 0.75rem;
+  font-size: 0.78rem;
   font-weight: 600;
-  background: var(--stitch-surface-low);
-  color: var(--stitch-on-surface);
-  border: 1px solid var(--stitch-border-subtle);
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+  border: 1px solid var(--border-subtle);
 }
 
 /* --------------------------------------------------------------------------
@@ -2332,34 +2344,82 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
 }
 
 .stitch-dropzone-box {
-  border: 2px dashed var(--stitch-outline-variant);
-  border-radius: 12px;
+  border: 2px dashed var(--border-subtle);
+  border-radius: 14px;
   padding: 36px 20px;
   text-align: center;
-  background: var(--stitch-surface-low);
+  background: var(--bg-surface-elevated);
   cursor: pointer;
   transition: all 0.2s ease;
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
+  min-height: 200px;
+  gap: 12px;
 }
 
 .stitch-dropzone-box:hover,
-.stitch-dropzone-box.drag-over {
-  border-color: var(--stitch-primary);
-  background: rgba(99, 91, 255, 0.04);
+.stitch-dropzone-box.drag-over,
+.stitch-dropzone-box.is-dragging {
+  border-color: var(--accent-primary);
+  background: rgba(99, 102, 241, 0.04);
 }
 
+.stitch-dropzone-idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  pointer-events: none;
+}
+
+.stitch-upload-icon-circle,
 .stitch-drop-icon {
   width: 52px;
   height: 52px;
   border-radius: 14px;
-  background: var(--stitch-surface);
-  color: var(--stitch-primary);
+  background: var(--bg-surface);
+  color: var(--accent-primary);
   display: grid;
   place-items: center;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  border: 1px solid var(--border-subtle);
+  margin-bottom: 4px;
+}
+
+.stitch-dropzone-idle h4 {
+  font-size: 1.05rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.stitch-dropzone-idle p {
+  font-size: 0.85rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+.stitch-browse-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 16px;
+  border-radius: 8px;
+  background: var(--bg-surface);
+  color: var(--accent-primary);
+  font-weight: 600;
+  font-size: 0.82rem;
+  border: 1px solid var(--border-subtle);
+  margin-top: 6px;
+  transition: all 0.15s ease;
+}
+
+.stitch-dropzone-box:hover .stitch-browse-btn {
+  background: var(--accent-primary);
+  color: #ffffff;
+  border-color: var(--accent-primary);
 }
 
 .stitch-file-preview-card {

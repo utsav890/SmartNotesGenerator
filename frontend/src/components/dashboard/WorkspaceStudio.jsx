@@ -92,6 +92,7 @@ export default function WorkspaceStudio({
               accept=".mp3,.wav,.m4a,.mp4,.ogg,.webm,.flac,.aac,audio/*,video/mp4"
               disabled={loading}
               aria-label="Choose lecture audio or video file"
+              style={{ display: "none" }}
               onChange={(e) => {
                 setFile(e.target.files?.[0] || null);
                 setTranscript("");

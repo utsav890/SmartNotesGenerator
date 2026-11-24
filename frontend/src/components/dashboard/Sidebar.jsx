@@ -169,10 +169,17 @@ export default function Sidebar({
         {/* User Profile Row */}
         <div className="stitch-user-profile-row">
           <div className="stitch-avatar-circle">
-            {(user?.name || user?.email || "U").slice(0, 2).toUpperCase()}
+            {(
+              (user?.full_name || user?.name || user?.email || "U")
+                .split(" ")
+                .filter(Boolean)
+                .map((w) => w[0])
+                .join("")
+                .slice(0, 2) || "U"
+            ).toUpperCase()}
           </div>
           <div className="stitch-user-info-text">
-            <span className="user-name">{user?.name || "Student"}</span>
+            <span className="user-name">{user?.full_name || user?.name || "Student"}</span>
             <span className="user-email">{user?.email || "student@noteflow.ai"}</span>
           </div>
           <button
