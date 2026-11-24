@@ -7,7 +7,8 @@ import {
   CircleX,
   ChevronLeft,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  ArrowRight
 } from "lucide-react";
 
 export default function QuizView({
@@ -28,8 +29,86 @@ export default function QuizView({
   readerTitle,
   quizQuestionHeadingRef,
   quizResultsHeadingRef,
+  lectures = [],
+  openSavedNote,
+  resetWorkspace,
 }) {
   const currentQuizAnswer = quizAnswers[quizQuestionIndex];
+
+  if (!quizLoading && !quiz && !quizError) {
+    return (
+      <section className="quiz-page" aria-label="Lecture Quiz Selection">
+        <button
+          type="button"
+          className="back-btn"
+          onClick={() => {
+            if (resetWorkspace) resetWorkspace();
+            setView("dashboard");
+          }}
+        >
+          <ArrowLeft size={16} aria-hidden="true" />
+          Back to Dashboard
+        </button>
+
+        <div className="quiz-selector-card">
+          <div className="selector-icon-badge">
+            <Brain size={28} />
+          </div>
+          <h2>Select a Lecture to Test Your Knowledge</h2>
+          <p>
+            Choose a synthesized lecture below. Our AI will automatically generate an active recall quiz to test your comprehension and retention.
+          </p>
+
+          {lectures && lectures.length > 0 ? (
+            <div className="lecture-selector-grid">
+              {lectures.map((lec) => (
+                <button
+                  key={lec.id}
+                  type="button"
+                  className="lecture-select-item"
+                  onClick={() => {
+                    if (generateAndOpenQuiz) {
+                      generateAndOpenQuiz(lec);
+                    } else if (openSavedNote) {
+                      openSavedNote(lec);
+                    }
+                  }}
+                >
+                  <div className="item-icon-wrapper secondary">
+                    <Brain size={20} />
+                  </div>
+                  <div className="item-info">
+                    <span className="item-title">{lec.title}</span>
+                    <span className="item-meta">
+                      {lec.audio_format || "Lecture Audio"} • {lec.created_at ? new Date(lec.created_at).toLocaleDateString() : "Ready"}
+                    </span>
+                  </div>
+                  <div className="item-arrow-action">
+                    <span>Start Quiz</span>
+                    <ArrowRight size={16} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="selector-empty-cta">
+              <p>No synthesized lectures available to quiz yet.</p>
+              <button
+                type="button"
+                className="stitch-primary-btn"
+                onClick={() => {
+                  if (resetWorkspace) resetWorkspace();
+                  setView("dashboard");
+                }}
+              >
+                <Sparkles size={16} /> Go to Ingestion Studio
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
 
   return (
     <section className="quiz-page" aria-labelledby="quiz-title">

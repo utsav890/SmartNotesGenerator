@@ -1130,6 +1130,9 @@ function App() {
               deletingNotes={deletingNotes}
               deleteSavedNotes={deleteSavedNotes}
               openSavedNote={openSavedNote}
+              lectures={lectures}
+              resetWorkspace={resetWorkspace}
+              setView={setView}
             />
           )}
 
@@ -1153,6 +1156,9 @@ function App() {
               readerTitle={readerTitle}
               quizQuestionHeadingRef={quizQuestionHeadingRef}
               quizResultsHeadingRef={quizResultsHeadingRef}
+              lectures={lectures}
+              openSavedNote={openSavedNote}
+              resetWorkspace={resetWorkspace}
             />
           )}
 

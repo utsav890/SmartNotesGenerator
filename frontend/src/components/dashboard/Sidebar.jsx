@@ -10,8 +10,7 @@ import {
   Moon,
   Shield,
   ShieldAlert,
-  LogOut,
-  Sparkle
+  LogOut
 } from "lucide-react";
 
 export default function Sidebar({
@@ -167,22 +166,6 @@ export default function Sidebar({
 
       {/* Sidebar Footer */}
       <div className="stitch-sidebar-footer">
-        {/* Upgrade Card */}
-        <div className="stitch-pro-card">
-          <div className="pro-header">
-            <Sparkle size={16} />
-            <span>NoteFlow Pro</span>
-          </div>
-          <p>Unlimited lecture audio uploads, advanced RAG reasoning, and quiz exports.</p>
-          <button
-            type="button"
-            className="stitch-pro-btn"
-            onClick={() => alert("NoteFlow Pro features are unlocked on your educational tier!")}
-          >
-            Upgrade Plan
-          </button>
-        </div>
-
         {/* User Profile Row */}
         <div className="stitch-user-profile-row">
           <div className="stitch-avatar-circle">

@@ -405,7 +405,7 @@ export default function AdminPanel() {
               <h3 className="admin-card-title">
                 <Crown size={18} color="#c084fc" /> Quick Grant Admin Access
               </h3>
-              <p style={{ color: "#94a3b8", fontSize: "0.86rem", margin: 0, lineHeight: 1.5 }}>
+              <p className="admin-card-desc">
                 Instantly grant full administrator privileges to any registered user account by their email address.
               </p>
               <form className="promote-form" onSubmit={handlePromoteEmail}>
@@ -433,7 +433,7 @@ export default function AdminPanel() {
               <h3 className="admin-card-title" style={{ color: "#f87171" }}>
                 <UserX size={18} color="#ef4444" /> Quick Remove User Account
               </h3>
-              <p style={{ color: "#94a3b8", fontSize: "0.86rem", margin: 0, lineHeight: 1.5 }}>
+              <p className="admin-card-desc">
                 Permanently delete any registered user and cascade-remove all their lectures, notes, transcripts, and sessions.
               </p>
               <form className="promote-form" onSubmit={handleQuickDeleteEmail}>

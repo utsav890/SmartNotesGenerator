@@ -879,7 +879,15 @@
 .sec-grid-two {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
-  gap: 1.25rem;
+  gap: 16px;
+  width: 100%;
+}
+
+.sec-grid-two .auth-field,
+.sec-grid-two .auth-input-wrapper,
+.sec-grid-two .auth-input {
+  box-sizing: border-box;
+  width: 100%;
 }
 
 .sec-form-actions {
@@ -1473,4 +1481,84 @@
   .user-trigger-name {
     display: none;
   }
+}
+
+/* --------------------------------------------------------------------------
+   Light Mode Overrides for Auth & Security Views
+   -------------------------------------------------------------------------- */
+[data-theme="light"] .security-page-viewport {
+  background: var(--stitch-bg, #f8fafc);
+  color: #0f172a;
+}
+
+[data-theme="light"] .security-header h1 {
+  color: #0f172a;
+}
+
+[data-theme="light"] .security-subtitle {
+  color: #475569;
+}
+
+[data-theme="light"] .security-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+}
+
+[data-theme="light"] .security-card-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .security-card-desc {
+  color: #475569;
+}
+
+[data-theme="light"] .sec-info-label {
+  color: #64748b;
+}
+
+[data-theme="light"] .sec-info-value {
+  color: #0f172a;
+}
+
+[data-theme="light"] .auth-label {
+  color: #475569;
+}
+
+[data-theme="light"] .auth-input {
+  color: #0f172a;
+  background-color: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .auth-input:focus {
+  background-color: #ffffff;
+  border-color: #6366f1;
+}
+
+[data-theme="light"] .auth-card {
+  background: #ffffff;
+  border-color: #e2e8f0;
+  color: #0f172a;
+}
+
+[data-theme="light"] .auth-title {
+  color: #0f172a;
+}
+
+[data-theme="light"] .auth-subtitle {
+  color: #475569;
+}
+
+[data-theme="light"] .session-item {
+  background: #f8fafc;
+  border-color: #e2e8f0;
+}
+
+[data-theme="light"] .session-device-name {
+  color: #0f172a;
+}
+
+[data-theme="light"] .session-detail {
+  color: #475569;
 }

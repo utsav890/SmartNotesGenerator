@@ -203,9 +203,16 @@
   margin: 0;
 }
 
+.admin-card-desc {
+  color: var(--text-secondary);
+  font-size: 0.86rem;
+  line-height: 1.5;
+  margin: 0 0 12px 0;
+}
+
 .promote-form {
   display: flex;
-  gap: 0.75rem;
+  gap: 12px;
   flex-wrap: wrap;
 }
 

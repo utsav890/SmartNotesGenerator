@@ -10,7 +10,9 @@ import {
   Clock,
   RotateCcw,
   Sparkles,
-  Send
+  Send,
+  BookOpen,
+  ArrowRight
 } from "lucide-react";
 import NotesArticle from "./NotesArticle";
 
@@ -47,7 +49,79 @@ export default function NoteReaderView({
   deletingNotes,
   deleteSavedNotes,
   openSavedNote,
+  lectures = [],
+  resetWorkspace,
+  setView,
 }) {
+  if (!notesLoading && !notesError && !notes) {
+    return (
+      <section className="reader-card" aria-label="Study Sheets Selection">
+        <button
+          type="button"
+          className="back-btn"
+          onClick={() => {
+            if (resetWorkspace) resetWorkspace();
+            if (setView) setView("dashboard");
+            else openMyNotes();
+          }}
+        >
+          <ArrowLeft size={16} aria-hidden="true" /> Back to Dashboard
+        </button>
+
+        <div className="study-sheet-selector-card">
+          <div className="selector-icon-badge">
+            <BookOpen size={28} />
+          </div>
+          <h2>Select a Lecture Study Sheet</h2>
+          <p>
+            Choose one of your synthesized lectures below to inspect structured notes, review key takeaways, and chat with AI Copilot.
+          </p>
+
+          {lectures && lectures.length > 0 ? (
+            <div className="lecture-selector-grid">
+              {lectures.map((lec) => (
+                <button
+                  key={lec.id}
+                  type="button"
+                  className="lecture-select-item"
+                  onClick={() => openSavedNote(lec)}
+                >
+                  <div className="item-icon-wrapper">
+                    <FileText size={20} />
+                  </div>
+                  <div className="item-info">
+                    <span className="item-title">{lec.title}</span>
+                    <span className="item-meta">
+                      {lec.audio_format || "Lecture Audio"} • {lec.created_at ? new Date(lec.created_at).toLocaleDateString() : "Saved"}
+                    </span>
+                  </div>
+                  <div className="item-arrow-action">
+                    <span>View Notes</span>
+                    <ArrowRight size={16} />
+                  </div>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="selector-empty-cta">
+              <p>No synthesized lectures found in your library yet.</p>
+              <button
+                type="button"
+                className="stitch-primary-btn"
+                onClick={() => {
+                  if (resetWorkspace) resetWorkspace();
+                  if (setView) setView("dashboard");
+                }}
+              >
+                <Sparkles size={16} /> Go to Ingestion Studio
+              </button>
+            </div>
+          )}
+        </div>
+      </section>
+    );
+  }
+
   return (
     <section className="reader-card" aria-labelledby="reader-title">
       <button type="button" className="back-btn" onClick={openMyNotes}>
