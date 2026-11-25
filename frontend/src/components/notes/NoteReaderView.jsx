@@ -12,7 +12,8 @@ import {
   Sparkles,
   Send,
   BookOpen,
-  ArrowRight
+  ArrowRight,
+  FileText
 } from "lucide-react";
 import NotesArticle from "./NotesArticle";
 

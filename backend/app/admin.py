@@ -23,7 +23,7 @@ from app.models import (
     EmailVerificationToken,
     PasswordResetToken
 )
-from app.auth import get_current_user, require_admin, serialize_user
+from app.auth import require_admin, serialize_user
 
 logger = logging.getLogger(__name__)
 

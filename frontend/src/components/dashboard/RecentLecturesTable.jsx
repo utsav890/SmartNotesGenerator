@@ -116,7 +116,6 @@ export default function RecentLecturesTable({
                 {filteredRecentLectures.map((lec) => {
                   const isReady = lec.has_notes || lec.notes || lec.status === "completed";
                   const isFailed = lec.status === "failed";
-                  const isProcessing = !isReady && !isFailed;
                   const subj = getSubject(lec);
 
                   return (
