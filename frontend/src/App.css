@@ -3548,3 +3548,184 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
   transform: none;
 }
 
+/* --------------------------------------------------------------------------
+   Mobile & Responsive Stabilization (Stitch App Shell)
+   -------------------------------------------------------------------------- */
+.stitch-main-canvas {
+  flex: 1;
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow-x: hidden;
+}
+
+.stitch-content-container {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.stitch-dashboard-stack,
+.stitch-recent-section,
+.stitch-table-card {
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+@media (max-width: 768px) {
+  .stitch-sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 50;
+    transform: translateX(-100%);
+    box-shadow: var(--shadow-lg);
+    transition: transform 0.25s ease;
+  }
+
+  .stitch-sidebar.is-open {
+    transform: translateX(0);
+  }
+
+  .stitch-topbar {
+    padding: 0 14px;
+    gap: 8px;
+  }
+
+  .stitch-search-container {
+    display: none;
+  }
+
+  .stitch-pipeline-chip {
+    display: none;
+  }
+
+  .stitch-content-container {
+    padding: 16px 14px;
+  }
+
+  .stitch-workspace-header,
+  .stitch-table-header-row {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .stitch-table-filters {
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .stitch-filter-tabs {
+    flex-wrap: wrap;
+  }
+}
+
+/* --------------------------------------------------------------------------
+   Transcript Ingestion Tab Styles
+   -------------------------------------------------------------------------- */
+.stitch-transcript-box {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+}
+
+.transcript-box-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.transcript-box-header label {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sample-chips {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.sample-label {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.sample-chip-btn {
+  padding: 5px 12px;
+  border-radius: 9999px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  background: var(--bg-surface-elevated);
+  color: var(--accent-primary);
+  border: 1px solid var(--border-subtle);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.sample-chip-btn:hover:not(:disabled) {
+  background: var(--accent-primary);
+  color: #ffffff;
+  border-color: var(--accent-primary);
+}
+
+.stitch-textarea {
+  width: 100%;
+  min-height: 180px;
+  padding: 14px 16px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 0.92rem;
+  line-height: 1.6;
+  resize: vertical;
+  box-sizing: border-box;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.stitch-textarea::placeholder {
+  color: var(--text-muted);
+}
+
+.stitch-textarea:focus {
+  outline: none;
+  border-color: var(--accent-primary);
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.stitch-textarea-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  padding: 0 4px;
+}
+
+.stitch-error-banner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  background: var(--danger-soft, rgba(239, 68, 68, 0.12));
+  border: 1px solid var(--danger-border, rgba(239, 68, 68, 0.3));
+  color: var(--danger, #ef4444);
+  font-size: 0.88rem;
+  font-weight: 500;
+  margin-top: 12px;
+}
+

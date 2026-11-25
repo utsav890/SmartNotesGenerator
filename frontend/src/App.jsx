@@ -620,14 +620,18 @@ function App() {
     setMobileMenuOpen(false);
     setNotesError("");
     setLibraryNotice("");
-    setNotesLoading(true);
+    if (lectures.length === 0) {
+      setNotesLoading(true);
+    }
 
     try {
       const result = await apiRequest("/lectures");
       setLectures(Array.isArray(result.lectures) ? result.lectures : []);
     } catch (err) {
       console.error("Saved notes list error:", err);
-      setNotesError(err.message || "Failed to load your saved notes.");
+      if (lectures.length === 0) {
+        setNotesError(err.message || "Failed to load your saved notes.");
+      }
     } finally {
       setNotesLoading(false);
     }
