@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { motion, useReducedMotion } from "framer-motion";
-import { Sparkles, Eye, EyeOff, AlertCircle, ArrowRight, LoaderCircle, BookOpen, Shield, Check } from "lucide-react";
+import { Sparkles, Eye, EyeOff, AlertCircle, ArrowRight, LoaderCircle, BookOpen, Check } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import { useRouter } from "../../context/RouterContext";
 
@@ -49,10 +49,6 @@ export default function LoginPage() {
       setEmail("regular.student@university.edu");
       setPassword("Std#P@ssword2026!");
       setSelectedDemo("student");
-    } else if (role === "admin") {
-      setEmail("admin.super@smartnotes.ai");
-      setPassword("Admin#P@ssword2026!");
-      setSelectedDemo("admin");
     }
     setErrorMessage("");
   };
@@ -155,7 +151,7 @@ export default function LoginPage() {
                 <span className="auth-error-title">{errorMessage}</span>
                 {errorMessage.toLowerCase().includes("incorrect") && (
                   <span className="auth-error-hint">
-                    Check your password or click one of the demo buttons below for one-click credentials.
+                    Check your password or click the Student demo button below for one-click access.
                   </span>
                 )}
               </div>
@@ -249,16 +245,6 @@ export default function LoginPage() {
                 <BookOpen size={13} aria-hidden="true" />
                 <span>Student</span>
                 {selectedDemo === "student" && <Check size={12} aria-hidden="true" />}
-              </button>
-              <button
-                type="button"
-                className={`auth-quick-fill-btn ${selectedDemo === "admin" ? "active" : ""}`}
-                onClick={() => handleDemoSelect("admin")}
-                title="Fill platform administrator credentials"
-              >
-                <Shield size={13} aria-hidden="true" />
-                <span>Admin</span>
-                {selectedDemo === "admin" && <Check size={12} aria-hidden="true" />}
               </button>
             </div>
 
