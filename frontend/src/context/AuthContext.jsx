@@ -23,7 +23,7 @@ export function AuthProvider({ children }) {
       };
 
       const currentToken = token || localStorage.getItem("smartnotes_token");
-      if (currentToken) {
+      if (currentToken && currentToken !== "null" && currentToken !== "undefined" && currentToken !== "session") {
         headers["Authorization"] = `Bearer ${currentToken}`;
       }
 
@@ -52,7 +52,8 @@ export function AuthProvider({ children }) {
   // Initialize and check user session on mount
   const refreshUser = useCallback(async () => {
     const storedToken = localStorage.getItem("smartnotes_token");
-    if (!storedToken) {
+    const hasSessionHint = localStorage.getItem("noteflow_session_hint") === "1";
+    if (!storedToken && !hasSessionHint) {
       setUser(null);
       setIsLoading(false);
       return null;
@@ -62,12 +63,13 @@ export function AuthProvider({ children }) {
       const data = await authFetch("/api/auth/me");
       if (data?.user) {
         setUser(data.user);
+        setToken((prev) => prev || localStorage.getItem("smartnotes_token") || "session");
         return data.user;
       }
     } catch (err) {
       console.warn("Session check failed or expired:", err.message);
-      // Invalidate local token if session expired on backend
       localStorage.removeItem("smartnotes_token");
+      localStorage.removeItem("noteflow_session_hint");
       setToken(null);
       setUser(null);
     } finally {
@@ -91,9 +93,11 @@ export function AuthProvider({ children }) {
 
       if (res.token) {
         localStorage.setItem("smartnotes_token", res.token);
+        localStorage.setItem("noteflow_session_hint", "1");
         setToken(res.token);
       }
       if (res.user) {
+        localStorage.setItem("noteflow_session_hint", "1");
         setUser(res.user);
       }
       return res;
@@ -119,9 +123,11 @@ export function AuthProvider({ children }) {
 
       if (res.token) {
         localStorage.setItem("smartnotes_token", res.token);
+        localStorage.setItem("noteflow_session_hint", "1");
         setToken(res.token);
       }
       if (res.user) {
+        localStorage.setItem("noteflow_session_hint", "1");
         setUser(res.user);
       }
       return res;
@@ -139,6 +145,7 @@ export function AuthProvider({ children }) {
       console.warn("Backend logout notification failed:", err.message);
     } finally {
       localStorage.removeItem("smartnotes_token");
+      localStorage.removeItem("noteflow_session_hint");
       setToken(null);
       setUser(null);
       // Hard reload to /login wipes all React state, audio buffers, and caches
@@ -225,6 +232,7 @@ export function AuthProvider({ children }) {
       body: JSON.stringify({ password })
     });
     localStorage.removeItem("smartnotes_token");
+    localStorage.removeItem("noteflow_session_hint");
     setToken(null);
     setUser(null);
     return res;
@@ -301,7 +309,7 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     token,
-    isAuthenticated: Boolean(user && token),
+    isAuthenticated: Boolean(user),
     isAdmin: Boolean(user?.is_admin || user?.role === "admin"),
     isLoading,
     authError,

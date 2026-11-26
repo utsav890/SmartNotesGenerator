@@ -1,4 +1,4 @@
-"""Lecture audio/video transcription powered by OpenAI Whisper with ffmpeg MP4 audio extraction."""
+"""Optimized lecture audio/MP4 transcription powered by OpenAI Whisper with fast 16kHz PCM extraction."""
 
 import logging
 import os
@@ -11,24 +11,28 @@ from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
+_FFMPEG_CONVERT_EXTENSIONS = {".mp4", ".mov", ".avi", ".mkv", ".mp3", ".m4a", ".ogg", ".opus", ".webm", ".flac", ".aac"}
+
 
 @lru_cache(maxsize=1)
 def load_model():
-    """Lazy-load the OpenAI Whisper model once and cache it across requests."""
+    """Lazy-load and cache the Whisper model once across requests with tuned CPU threading."""
+    import torch
     import whisper
 
-    model_name = os.getenv("WHISPER_MODEL", "base").strip() or "base"
+    torch.set_num_threads(min(4, max(1, os.cpu_count() or 2)))
+    model_name = os.getenv("WHISPER_MODEL", "tiny").strip() or "tiny"
     return whisper.load_model(model_name)
 
 
 def _convert_video_to_audio_if_needed(path: Path) -> Path:
-    """Extract a 16kHz mono WAV track from video containers (.mp4, etc.) via ffmpeg when available."""
-    if path.suffix.lower() in (".mp4", ".mov", ".avi", ".mkv"):
+    """Convert non-WAV media (.mp4, .mp3, etc.) to 16kHz mono PCM WAV via ffmpeg for fast decoding."""
+    if path.suffix.lower() in _FFMPEG_CONVERT_EXTENSIONS:
         ffmpeg_bin = shutil.which("ffmpeg")
         if ffmpeg_bin:
             converted_path = path.with_suffix(".extracted.wav")
             if not converted_path.is_file() or converted_path.stat().st_size == 0:
-                logger.info("Extracting audio from video file %s via ffmpeg...", path.name)
+                logger.info("Pre-converting %s to 16kHz mono WAV via ffmpeg...", path.name)
                 try:
                     subprocess.run(
                         [
@@ -47,18 +51,20 @@ def _convert_video_to_audio_if_needed(path: Path) -> Path:
                         ],
                         check=True,
                         capture_output=True,
+                        timeout=180,
                     )
                     return converted_path
                 except Exception as ffmpeg_err:
                     logger.warning(
-                        "ffmpeg audio pre-extraction failed (%s); falling back to direct Whisper decoding.",
+                        "ffmpeg pre-conversion skipped (%s); letting Whisper decode %s directly.",
                         ffmpeg_err,
+                        path.name,
                     )
     return path
 
 
 def transcribe_audio(file_path: str) -> dict:
-    """Transcribe an audio or MP4 file using Whisper (with ffmpeg video track extraction)."""
+    """Transcribe an audio or MP4 file using tuned single-beam Whisper inference."""
     path = Path(file_path)
     if not path.is_file():
         raise FileNotFoundError(f"Audio file not found: {file_path}")
@@ -75,8 +81,15 @@ def transcribe_audio(file_path: str) -> dict:
     model_loaded_at = time.perf_counter()
 
     try:
-        logger.info("Starting Whisper transcription on %s...", target_path.name)
-        result = model.transcribe(str(target_path), fp16=False)
+        logger.info("Starting fast Whisper transcription on %s...", target_path.name)
+        result = model.transcribe(
+            str(target_path),
+            fp16=False,
+            beam_size=1,
+            best_of=1,
+            condition_on_previous_text=False,
+            temperature=0.0,
+        )
     except Exception as exc:
         logger.error(
             "Whisper audio transcription failed for %s after %.2f seconds:\n%s",

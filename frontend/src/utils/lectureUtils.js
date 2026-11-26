@@ -190,25 +190,52 @@ export function buildNotesExportText(notes, { markdown = false } = {}) {
 }
 
 export async function apiRequest(url, options = {}) {
-  const token = localStorage.getItem("smartnotes_token");
+  const { skipAuthRedirect = false, ...fetchOptions } = options;
+  const rawToken = localStorage.getItem("smartnotes_token");
+  const token =
+    rawToken && rawToken !== "null" && rawToken !== "undefined" && rawToken !== "session"
+      ? rawToken
+      : "";
   const headers = {
-    ...(options.headers || {}),
+    ...(fetchOptions.headers || {}),
     ...(token ? { Authorization: `Bearer ${token}` } : {})
   };
 
-  const response = await fetch(`${API_BASE_URL}${url}`, {
-    ...options,
+  let response = await fetch(`${API_BASE_URL}${url}`, {
+    ...fetchOptions,
     headers,
     credentials: "include"
   });
+
+  // If Bearer token was stale while an HttpOnly session cookie is still valid, retry once with cookie auth.
+  if (response.status === 401 && token && !url.includes("/api/auth/")) {
+    const cookieMeRes = await fetch(`${API_BASE_URL}/api/auth/me`, { credentials: "include" }).catch(() => null);
+    if (cookieMeRes && cookieMeRes.ok) {
+      localStorage.removeItem("smartnotes_token");
+      const retryHeaders = { ...(fetchOptions.headers || {}) };
+      response = await fetch(`${API_BASE_URL}${url}`, {
+        ...fetchOptions,
+        headers: retryHeaders,
+        credentials: "include"
+      });
+    }
+  }
+
   const data = await response.json().catch(() => ({}));
 
   if (!response.ok) {
-    if (response.status === 401 && !url.includes("/api/auth/")) {
-      localStorage.removeItem("smartnotes_token");
-      const currentPath = window.location.pathname;
-      if (currentPath !== "/login") {
-        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+    if (response.status === 401 && !url.includes("/api/auth/") && !skipAuthRedirect) {
+      const meCheck = await fetch(`${API_BASE_URL}/api/auth/me`, {
+        headers: token ? { Authorization: `Bearer ${token}` } : {},
+        credentials: "include"
+      }).catch(() => null);
+
+      if (!meCheck || meCheck.status === 401) {
+        localStorage.removeItem("smartnotes_token");
+        const currentPath = window.location.pathname;
+        if (currentPath !== "/login") {
+          window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
+        }
       }
     }
     throw new Error(data.detail || data.message || `Request failed with status ${response.status}`);

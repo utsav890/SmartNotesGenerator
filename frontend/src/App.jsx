@@ -284,7 +284,7 @@ function App() {
   // Load library, stats, or deep-linked lecture
   const fetchLecturesAndStats = async () => {
     try {
-      const result = await apiRequest("/lectures");
+      const result = await apiRequest("/lectures", { skipAuthRedirect: true });
       if (Array.isArray(result?.lectures)) {
         setLectures(result.lectures);
       }
@@ -438,7 +438,7 @@ function App() {
       });
       fetchLecturesAndStats();
 
-      setStatus("Transcribing audio with Gemini AI...");
+      setStatus("Transcribing audio with Whisper...");
       await apiRequest(`/transcribe/${encodeURIComponent(filename)}`, {
         method: "POST",
       });

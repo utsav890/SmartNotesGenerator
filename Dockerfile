@@ -40,10 +40,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
-# Install python dependencies
+# Install python dependencies & pre-cache default Whisper tiny model weights
 COPY backend/requirements.txt .
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r requirements.txt
+    pip install --no-cache-dir -r requirements.txt && \
+    python -c "import whisper; whisper.load_model('tiny')" || true
 
 # Copy backend application source code
 COPY backend/app/ ./app/

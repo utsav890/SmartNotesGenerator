@@ -436,38 +436,35 @@ def serialize_user(user: User) -> dict:
 # --------------------------------------------------
 # SESSION & CURRENT USER DEPENDENCY
 # --------------------------------------------------
-def get_token_from_request(request: Request) -> Optional[str]:
-    # 1. Check Authorization Bearer header
+def get_candidate_tokens(request: Request) -> list[str]:
+    """Return non-empty Bearer and cookie tokens in priority order without duplicates."""
+    candidates: list[str] = []
     auth_header = request.headers.get("authorization", "")
     if auth_header.startswith("Bearer "):
-        token = auth_header[len("Bearer "):].strip()
-        if token:
-            return token
+        bearer = auth_header[len("Bearer "):].strip()
+        if bearer and bearer not in ("null", "undefined", "session"):
+            candidates.append(bearer)
 
-    # 2. Check Cookie
     cookie_token = request.cookies.get(COOKIE_NAME)
-    if cookie_token:
-        return cookie_token
+    if cookie_token and cookie_token not in candidates:
+        candidates.append(cookie_token)
 
-    return None
+    return candidates
 
 
-def get_current_user_and_session(
-    request: Request,
-    db: Session = Depends(get_db)
+def get_token_from_request(request: Request) -> Optional[str]:
+    candidates = get_candidate_tokens(request)
+    return candidates[0] if candidates else None
+
+
+def _authenticate_single_token(
+    token: str,
+    secret: str,
+    now: datetime,
+    db: Session,
 ) -> tuple[User, UserSession]:
-    token = get_token_from_request(request)
-    if not token:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authentication required."
-        )
-
-    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    """Validate a single JWT/opaque token against signature, expiration, and active UserSession."""
     user = None
-    secret = get_and_validate_jwt_secret()
-
-    # 1. If token is formatted as JWT (header.payload.signature), validate signature & expiration
     if token.count(".") == 2:
         try:
             payload = jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
@@ -485,7 +482,6 @@ def get_current_user_and_session(
                 detail="Invalid authentication token."
             )
 
-    # 2. Check active database session for EVERY token to enforce logout & revocation
     t_hash = hash_token(token)
     session_record = db.query(UserSession).filter(
         UserSession.token_hash == t_hash,
@@ -514,10 +510,41 @@ def get_current_user_and_session(
             detail="Your account has been deactivated. Please contact an administrator."
         )
 
-    session_record.last_active_at = now
-    db.commit()
-
     return user, session_record
+
+
+def get_current_user_and_session(
+    request: Request,
+    db: Session = Depends(get_db)
+) -> tuple[User, UserSession]:
+    tokens = get_candidate_tokens(request)
+    if not tokens:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication required."
+        )
+
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    secret = get_and_validate_jwt_secret()
+    last_exc: Optional[HTTPException] = None
+
+    for candidate in tokens:
+        try:
+            user, session_record = _authenticate_single_token(candidate, secret, now, db)
+            last_active = getattr(session_record, "last_active_at", None)
+            if not last_active or (now - last_active) >= timedelta(minutes=2):
+                session_record.last_active_at = now
+                db.commit()
+            return user, session_record
+        except HTTPException as exc:
+            if exc.status_code == status.HTTP_403_FORBIDDEN:
+                raise
+            last_exc = exc
+
+    raise last_exc or HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Authentication required."
+    )
 
 
 def get_current_user(
