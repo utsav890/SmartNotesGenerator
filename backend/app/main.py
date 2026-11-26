@@ -244,21 +244,27 @@ def ensure_lecture_schema_columns(target_engine):
         logger.warning(f"Lecture schema column check notice: {col_err}")
 
 
-def recover_stale_processing_lectures(db: Session):
-    """Mark any stale processing lectures older than 10 minutes as failed."""
+def recover_stale_processing_lectures(db: Session, max_age_minutes: int = 2):
+    """Mark any stale in-progress lectures older than max_age_minutes as failed."""
     try:
         from datetime import datetime, timedelta
-        cutoff = datetime.utcnow() - timedelta(minutes=10)
+        cutoff = datetime.utcnow() - timedelta(minutes=max_age_minutes)
         stale_lectures = db.query(Lecture).filter(
-            Lecture.status == "processing",
+            Lecture.status.in_(["processing", "uploaded", "transcribed"]),
             Lecture.created_at <= cutoff
         ).all()
         for lec in stale_lectures:
-            setattr(lec, "status", "failed")
-            setattr(lec, "error_message", "Processing timed out or server restarted")
+            # Never mark failed if a Note was already persisted
+            has_note = db.query(Note.id).filter(Note.lecture_id == lec.id).first() is not None
+            if has_note:
+                setattr(lec, "status", "completed")
+                setattr(lec, "error_message", None)
+            else:
+                setattr(lec, "status", "failed")
+                setattr(lec, "error_message", "Processing timed out or server restarted. Click Retry to run again.")
         if stale_lectures:
             db.commit()
-            logger.info("Recovered %d stale processing lecture(s) -> marked failed.", len(stale_lectures))
+            logger.info("Recovered %d stale lecture(s).", len(stale_lectures))
     except Exception as err:
         logger.warning(f"Stale lecture recovery check notice: {err}")
 
@@ -1372,6 +1378,8 @@ def get_all_lectures(
     )
     if is_browser_nav and STATIC_DIR and (STATIC_DIR / "index.html").is_file():
         return FileResponse(STATIC_DIR / "index.html")
+
+    recover_stale_processing_lectures(db, max_age_minutes=4)
 
     all_lectures = db.query(Lecture).filter(
         Lecture.user_id == current_user.id

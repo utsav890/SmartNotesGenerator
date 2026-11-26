@@ -280,6 +280,16 @@ export default function NoteReaderView({
             Whisper transcription and Groq analysis are currently active. This page
             will automatically refresh when the notes are ready.
           </p>
+          {handleRetryLecture && selectedLecture?.id && (
+            <button
+              type="button"
+              className="secondary-btn"
+              style={{ marginTop: "12px" }}
+              onClick={() => handleRetryLecture(selectedLecture.id)}
+            >
+              <RotateCcw size={16} /> Restart / Retry Synthesis
+            </button>
+          )}
         </div>
       )}
 

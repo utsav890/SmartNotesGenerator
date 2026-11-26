@@ -1,4 +1,5 @@
 import logging
+import os
 import shutil
 import subprocess
 import time
@@ -14,6 +15,40 @@ def load_model():
     # Load the model once and reuse it (lazy-imported on first invocation)
     import whisper
     return whisper.load_model("base")
+
+
+def _transcribe_via_groq(target_path: Path):
+    """Use Groq's ultra-fast Whisper API when GROQ_API_KEY is configured and file <= 24MB."""
+    api_key = os.getenv("GROQ_API_KEY", "").strip()
+    env = os.getenv("ENVIRONMENT", "development").lower()
+    if not api_key or env == "testing" or not target_path.exists():
+        return None
+
+    try:
+        file_size = target_path.stat().st_size
+    except OSError:
+        return None
+
+    if file_size == 0 or file_size > 24 * 1024 * 1024:
+        return None
+
+    try:
+        from groq import Groq
+        client = Groq(api_key=api_key, timeout=60.0)
+        logger.info("Transcribing %s (%.2f MB) via Groq Whisper API...", target_path.name, file_size / (1024 * 1024))
+        with open(target_path, "rb") as audio_file:
+            resp = client.audio.transcriptions.create(
+                file=(target_path.name, audio_file),
+                model="whisper-large-v3-turbo",
+                response_format="verbose_json",
+            )
+        text = getattr(resp, "text", None) or (resp.get("text") if isinstance(resp, dict) else "")
+        language = getattr(resp, "language", None) or (resp.get("language") if isinstance(resp, dict) else "en")
+        if isinstance(text, str) and text.strip():
+            return {"transcript": text.strip(), "language": language or "en"}
+    except Exception as groq_err:
+        logger.warning("Groq Whisper API failed (%s); falling back to local Whisper model.", groq_err)
+    return None
 
 
 def _convert_video_to_audio_if_needed(path: Path) -> Path:
@@ -64,6 +99,22 @@ def transcribe_audio(file_path: str):
 
     started_at = time.perf_counter()
     target_path = _convert_video_to_audio_if_needed(path)
+
+    # Fast path: Groq Whisper API (avoids local PyTorch/Whisper OOM on Cloud Run)
+    groq_result = _transcribe_via_groq(target_path)
+    if groq_result is not None:
+        if target_path != path and target_path.is_file():
+            try:
+                target_path.unlink()
+            except Exception:
+                pass
+        logger.info(
+            "Groq Whisper timing: total=%.2fs transcript_chars=%d language=%s",
+            time.perf_counter() - started_at,
+            len(groq_result["transcript"]),
+            groq_result["language"],
+        )
+        return groq_result
 
     model = load_model()
     model_loaded_at = time.perf_counter()
