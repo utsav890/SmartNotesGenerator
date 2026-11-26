@@ -9,6 +9,7 @@ from qdrant_client.models import (
     VectorParams,
     PointStruct,
     Filter,
+    FilterSelector,
     FieldCondition,
     MatchValue,
     PayloadSchemaType
@@ -254,3 +255,24 @@ def search_chunks(
     )
 
     return results.points
+
+
+def delete_lecture_chunks(lecture_id: int):
+    """Delete all Qdrant vector chunks associated with a lecture."""
+    try:
+        client = ensure_collection()
+        client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=FilterSelector(
+                filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="lecture_id",
+                            match=MatchValue(value=lecture_id),
+                        )
+                    ]
+                )
+            ),
+        )
+    except Exception as exc:
+        print(f"Notice: Qdrant chunk deletion skipped for lecture {lecture_id}: {exc}")

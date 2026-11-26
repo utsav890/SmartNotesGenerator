@@ -1,3 +1,4 @@
+import { useState } from "react";
 import {
   Plus,
   Search,
@@ -7,7 +8,8 @@ import {
   RotateCcw,
   FileText,
   Clock,
-  ArrowUpRight
+  ArrowUpRight,
+  Trash2
 } from "lucide-react";
 
 export default function MyNotesView({
@@ -22,7 +24,10 @@ export default function MyNotesView({
   openSavedNote,
   openMyNotes,
   handleRetryLecture,
+  handleDeleteLecture,
 }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
   return (
     <section className="library-card" aria-labelledby="my-notes-title">
       <div className="library-heading">
@@ -146,27 +151,93 @@ export default function MyNotesView({
             const isReady = lecture.has_notes || lecture.status === "completed";
             const isFailed = lecture.status === "failed";
             const isProcessing = !isReady && !isFailed;
+            const isConfirming = confirmDeleteId === lecture.id;
+            const isDeleting = deletingId === lecture.id;
 
             return (
-              <button
-                type="button"
+              <div
+                role="button"
+                tabIndex={0}
                 className="lecture-card"
                 key={lecture.id}
                 onClick={() => openSavedNote(lecture)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    openSavedNote(lecture);
+                  }
+                }}
               >
                 <div className="lecture-card-header">
                   <div className="lecture-card-icon">
                     <FileText size={20} aria-hidden="true" />
                   </div>
-                  <span className="lecture-card-date">
-                    <Clock size={13} aria-hidden="true" />
-                    {lecture.created_at
-                      ? new Date(lecture.created_at).toLocaleDateString()
-                      : "Saved lecture"}
-                  </span>
+                  <div className="lecture-card-header-right">
+                    <span className="lecture-card-date">
+                      <Clock size={13} aria-hidden="true" />
+                      {lecture.created_at
+                        ? new Date(lecture.created_at).toLocaleDateString()
+                        : "Saved lecture"}
+                    </span>
+                    {handleDeleteLecture && (
+                      <button
+                        type="button"
+                        className="lecture-card-delete-btn"
+                        aria-label={`Delete ${lecture.title || "lecture"}`}
+                        title="Delete lecture and notes"
+                        disabled={isDeleting}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteId(
+                            isConfirming ? null : lecture.id
+                          );
+                        }}
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    )}
+                  </div>
                 </div>
                 <h3>{lecture.title || "Untitled Lecture"}</h3>
-                {isProcessing ? (
+
+                {isConfirming ? (
+                  <div
+                    className="lecture-card-footer lecture-card-confirm"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <span className="confirm-label">Delete permanently?</span>
+                    <div className="confirm-btns">
+                      <button
+                        type="button"
+                        className="stitch-table-btn retry-btn"
+                        disabled={isDeleting}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          setDeletingId(lecture.id);
+                          try {
+                            await handleDeleteLecture(lecture);
+                          } finally {
+                            setDeletingId(null);
+                            setConfirmDeleteId(null);
+                          }
+                        }}
+                      >
+                        {isDeleting ? "Deleting..." : "Delete"}
+                      </button>
+                      <button
+                        type="button"
+                        className="stitch-table-btn"
+                        disabled={isDeleting}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setConfirmDeleteId(null);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : isProcessing ? (
                   <div
                     className="lecture-card-footer"
                     style={{ color: "var(--accent-primary)", display: "flex", alignItems: "center" }}
@@ -198,7 +269,7 @@ export default function MyNotesView({
                     <ArrowUpRight size={16} aria-hidden="true" />
                   </div>
                 )}
-              </button>
+              </div>
             );
           })}
         </div>

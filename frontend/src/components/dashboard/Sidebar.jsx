@@ -26,6 +26,9 @@ export default function Sidebar({
   isAdmin,
   resetWorkspace,
   openMyNotes,
+  openStudySheets,
+  openQuizzes,
+  openChatView,
 }) {
   const handleNav = (targetView, routePath, action) => {
     if (action) {
@@ -82,7 +85,7 @@ export default function Sidebar({
           <button
             type="button"
             className={`stitch-nav-item${view === "note-reader" ? " active" : ""}`}
-            onClick={() => handleNav("note-reader", "/study-sheets")}
+            onClick={() => handleNav("note-reader", "/study-sheets", openStudySheets)}
           >
             <FileText size={18} />
             <span>Study Sheets</span>
@@ -90,7 +93,7 @@ export default function Sidebar({
           <button
             type="button"
             className={`stitch-nav-item${view === "quiz" ? " active" : ""}`}
-            onClick={() => handleNav("quiz", "/quizzes")}
+            onClick={() => handleNav("quiz", "/quizzes", openQuizzes)}
           >
             <Brain size={18} />
             <span>Quizzes</span>
@@ -115,17 +118,8 @@ export default function Sidebar({
           </button>
           <button
             type="button"
-            className="stitch-nav-item"
-            onClick={() => {
-              if (view === "note-reader") {
-                if (navigate) navigate("/chat");
-                const el = document.getElementById("lecture-question");
-                if (el) el.focus();
-                setMobileMenuOpen(false);
-              } else {
-                handleNav("note-reader", "/chat");
-              }
-            }}
+            className={`stitch-nav-item${view === "chat" ? " active" : ""}`}
+            onClick={() => handleNav("chat", "/chat", openChatView)}
           >
             <MessageCircleQuestion size={18} />
             <span>Chat with Lecture</span>

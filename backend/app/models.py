@@ -311,7 +311,7 @@ class Quiz(Base):
     __tablename__ = "quizzes"
 
     id = Column(
-        BigInteger,
+        ID_TYPE,
         primary_key=True,
         autoincrement=True
     )
@@ -351,7 +351,7 @@ class QuizQuestion(Base):
     __tablename__ = "quiz_questions"
 
     id = Column(
-        BigInteger,
+        ID_TYPE,
         primary_key=True,
         autoincrement=True
     )

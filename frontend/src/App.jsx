@@ -35,6 +35,7 @@ import { formatNotes } from "./utils/notesFormatter";
 import NoteReaderView from "./components/notes/NoteReaderView";
 import QuizView from "./components/quiz/QuizView";
 import MyNotesView from "./components/library/MyNotesView";
+import ChatView from "./components/chat/ChatView";
 
 const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL !== undefined
@@ -268,10 +269,28 @@ function App() {
         }
       } else if (pathname === "/notes" || pathname === "/lectures") {
         setView("my-notes");
-      } else if (pathname === "/study-sheets" || pathname === "/chat" || pathname.startsWith("/lecture/")) {
+      } else if (pathname === "/study-sheets") {
         setView("note-reader");
+        if (!searchParams.get("lectureId")) {
+          setSelectedLecture(null);
+          setNotes("");
+          setNotesError("");
+        }
+      } else if (pathname.startsWith("/lecture/")) {
+        setView("note-reader");
+      } else if (pathname === "/chat") {
+        setView("chat");
+        if (!searchParams.get("lectureId")) {
+          setSelectedLecture(null);
+          setConversation([]);
+          setHistoryError("");
+        }
       } else if (pathname === "/quizzes") {
         setView("quiz");
+        if (!searchParams.get("lectureId")) {
+          setQuiz(null);
+          setQuizError("");
+        }
       } else if (pathname === "/" || pathname === "/dashboard") {
         setView("dashboard");
       }
@@ -392,26 +411,6 @@ function App() {
       // ignore
     }
   };
-
-  useEffect(() => {
-    if (!isAuthenticated || isLoading) return;
-    fetchLecturesAndStats();
-
-    if (pathname.startsWith("/lecture/")) {
-      const lectureId = parseInt(pathname.split("/lecture/")[1], 10);
-      if (lectureId && (!selectedLecture || selectedLecture.id !== lectureId)) {
-        apiRequest(`/lectures/${lectureId}`)
-          .then((lectureData) => {
-            if (lectureData && lectureData.id) {
-              openSavedNote(lectureData);
-            }
-          })
-          .catch((err) => {
-            setNotesError(err.message || "Failed to load lecture");
-          });
-      }
-    }
-  }, [pathname, isAuthenticated, isLoading]);
 
   // Polling: background poll every 4s whenever any lecture in library is processing
   useEffect(() => {
@@ -584,6 +583,13 @@ function App() {
       const savedNotes = await apiRequest(`/lectures/${id}/notes`);
 
       setNotes(formatNotes(savedNotes));
+      setSelectedLecture({
+        id,
+        title: file.name,
+        status: "completed",
+        has_notes: true,
+        audio_format: file.name.split(".").pop()?.toUpperCase() || "AUDIO",
+      });
       setStatus("Your notes are ready!");
       showToast("Notes generated and saved successfully!");
       fetchLecturesAndStats();
@@ -655,6 +661,90 @@ function App() {
     } finally {
       setNotesLoading(false);
     }
+  };
+
+  // Select lecture & load Q&A thread inside dedicated Chat view
+  const selectChatLecture = async (lecture) => {
+    if (!lecture || !lecture.id) return;
+    setSelectedLecture(lecture);
+    setConversation([]);
+    setHistoryError("");
+    setQuestionError("");
+    setQuestion("");
+    setHistoryLoading(true);
+    setView("chat");
+
+    if (pathname !== "/chat" || searchParams.get("lectureId") !== String(lecture.id)) {
+      navigate(`/chat?lectureId=${lecture.id}`);
+    }
+
+    try {
+      const result = await apiRequest(`/lectures/${lecture.id}/questions`);
+      setConversation(Array.isArray(result.messages) ? result.messages : []);
+    } catch (err) {
+      console.error("Chat history loading error:", err);
+      setHistoryError("Couldn’t load saved questions. Try again.");
+    } finally {
+      setHistoryLoading(false);
+    }
+  };
+
+  // Open Study Sheets selector / reader view
+  const openStudySheets = () => {
+    if (loading || notesLoading) return;
+    if (pathname !== "/study-sheets") {
+      navigate("/study-sheets");
+    }
+    setSelectedLecture(null);
+    setNotes("");
+    setNotesError("");
+    setConversation([]);
+    setHistoryError("");
+    setView("note-reader");
+    setMobileMenuOpen(false);
+    fetchLecturesAndStats();
+  };
+
+  // Open Quizzes selector view
+  const openQuizzes = () => {
+    if (loading || quizLoading) return;
+    if (pathname !== "/quizzes") {
+      navigate("/quizzes");
+    }
+    setSelectedLecture(null);
+    setQuiz(null);
+    setQuizError("");
+    setQuizAnswers({});
+    setQuizQuestionIndex(0);
+    setQuizSubmitted(false);
+    setView("quiz");
+    setMobileMenuOpen(false);
+    fetchLecturesAndStats();
+  };
+
+  // Open dedicated RAG Chat view
+  const openChatView = (lectureArg = null) => {
+    if (loading) return;
+    const validArg =
+      lectureArg && typeof lectureArg === "object" && "id" in lectureArg && lectureArg.id
+        ? lectureArg
+        : null;
+    setMobileMenuOpen(false);
+    setView("chat");
+    fetchLecturesAndStats();
+
+    if (validArg && (validArg.has_notes || validArg.status === "completed")) {
+      selectChatLecture(validArg);
+      return;
+    }
+
+    if (pathname !== "/chat") {
+      navigate("/chat");
+    }
+    setSelectedLecture(null);
+    setConversation([]);
+    setHistoryError("");
+    setQuestionError("");
   };
 
   // Reload Q&A Conversation
@@ -732,13 +822,19 @@ function App() {
 
   // Generate and open quiz
   const generateAndOpenQuiz = async (lectureArg) => {
-    const targetLecture = lectureArg || selectedLecture;
-    if (!targetLecture || quizLoading) return;
+    const validArg =
+      lectureArg && typeof lectureArg === "object" && "id" in lectureArg && lectureArg.id
+        ? lectureArg
+        : null;
+    const targetLecture = validArg || (selectedLecture?.id ? selectedLecture : null);
+    if (quizLoading) return;
 
-    if (lectureArg) {
-      setSelectedLecture(lectureArg);
+    if (!targetLecture) {
+      openQuizzes();
+      return;
     }
 
+    setSelectedLecture(targetLecture);
     setView("quiz");
     setQuiz(null);
     setQuizLoading(true);
@@ -746,6 +842,10 @@ function App() {
     setQuizAnswers({});
     setQuizQuestionIndex(0);
     setQuizSubmitted(false);
+
+    if (pathname !== "/quizzes" || searchParams.get("lectureId") !== String(targetLecture.id)) {
+      navigate(`/quizzes?lectureId=${targetLecture.id}`);
+    }
 
     try {
       const result = await apiRequest(`/lectures/${targetLecture.id}/quiz`, { method: "POST" });
@@ -766,6 +866,65 @@ function App() {
       setQuizLoading(false);
     }
   };
+
+  // Sync deep links and library state on route change
+  useEffect(() => {
+    if (!isAuthenticated || isLoading) return;
+    fetchLecturesAndStats();
+
+    const queryLectureId = parseInt(searchParams.get("lectureId") || "", 10);
+
+    if (pathname.startsWith("/lecture/")) {
+      const lectureId = parseInt(pathname.split("/lecture/")[1], 10);
+      if (lectureId && (!selectedLecture || selectedLecture.id !== lectureId)) {
+        apiRequest(`/lectures/${lectureId}`)
+          .then((lectureData) => {
+            if (lectureData && lectureData.id) {
+              openSavedNote(lectureData);
+            }
+          })
+          .catch((err) => {
+            setNotesError(err.message || "Failed to load lecture");
+          });
+      }
+    } else if (pathname === "/study-sheets" && queryLectureId) {
+      if (!selectedLecture || selectedLecture.id !== queryLectureId) {
+        apiRequest(`/lectures/${queryLectureId}`)
+          .then((lectureData) => {
+            if (lectureData && lectureData.id) {
+              openSavedNote(lectureData);
+            }
+          })
+          .catch((err) => {
+            setNotesError(err.message || "Failed to load lecture");
+          });
+      }
+    } else if (pathname === "/chat" && queryLectureId) {
+      if (!selectedLecture || selectedLecture.id !== queryLectureId) {
+        apiRequest(`/lectures/${queryLectureId}`)
+          .then((lectureData) => {
+            if (lectureData && lectureData.id) {
+              selectChatLecture(lectureData);
+            }
+          })
+          .catch((err) => {
+            setHistoryError(err.message || "Failed to load lecture conversation");
+          });
+      }
+    } else if (pathname === "/quizzes" && queryLectureId) {
+      if ((!selectedLecture || selectedLecture.id !== queryLectureId) && !quizLoading) {
+        apiRequest(`/lectures/${queryLectureId}`)
+          .then((lectureData) => {
+            if (lectureData && lectureData.id) {
+              generateAndOpenQuiz(lectureData);
+            }
+          })
+          .catch((err) => {
+            setQuizError(err.message || "Could not prepare quiz for this lecture.");
+          });
+      }
+    }
+  }, [pathname, searchParams, isAuthenticated, isLoading]);
 
   const selectQuizAnswer = (answer) => {
     if (quizSubmitted) return;
@@ -792,31 +951,64 @@ function App() {
     );
   };
 
-  // Delete saved notes
-  const deleteSavedNotes = async () => {
-    if (!selectedLecture || deletingNotes) return;
+  // Permanently delete lecture, notes, Q&A, quizzes, and vectors
+  const deleteSavedNotes = async (lectureArg) => {
+    const validArg =
+      lectureArg && typeof lectureArg === "object" && "id" in lectureArg && lectureArg.id
+        ? lectureArg
+        : null;
+    const targetLecture = validArg || selectedLecture;
+    if (!targetLecture || deletingNotes) return false;
 
     setDeletingNotes(true);
     setDeleteError("");
 
     try {
-      await apiRequest(`/lectures/${selectedLecture.id}/notes`, {
+      await apiRequest(`/lectures/${targetLecture.id}`, {
         method: "DELETE",
       });
 
-      const deletedTitle = selectedLecture.title || "this lecture";
+      const deletedId = targetLecture.id;
+      const deletedTitle = targetLecture.title || "this lecture";
+
+      setLectures((prev) => prev.filter((l) => l.id !== deletedId));
+      setStats((prev) => {
+        if (!prev) return prev;
+        const wasReady = targetLecture.has_notes || targetLecture.status === "completed";
+        const dur = Number(targetLecture.duration_seconds) || 0;
+        return {
+          ...prev,
+          total_lectures: Math.max(0, (prev.total_lectures || 0) - 1),
+          notes_ready: Math.max(0, (prev.notes_ready || 0) - (wasReady ? 1 : 0)),
+          total_duration_seconds: Math.max(0, (prev.total_duration_seconds || 0) - dur),
+        };
+      });
+
+      if (selectedLecture?.id === deletedId) {
+        setSelectedLecture(null);
+        setNotes("");
+        setConversation([]);
+        setQuiz(null);
+        setQuestion("");
+      }
+
       setDeleteDialogOpen(false);
-      setSelectedLecture(null);
-      setNotes("");
-      setConversation([]);
-      await openMyNotes();
-      setLibraryNotice(
-        `Saved notes and Q&A for ${deletedTitle} were deleted. The lecture and transcript are still saved.`
-      );
-      showToast("Notes deleted successfully.");
+      setLibraryNotice(`"${deletedTitle}" was permanently deleted from your workspace.`);
+      showToast("Lecture deleted permanently.");
+
+      if (pathname.startsWith("/lecture/")) {
+        navigate("/notes", { replace: true });
+        setView("my-notes");
+      }
+
+      await fetchLecturesAndStats();
+      return true;
     } catch (err) {
-      console.error("Saved notes deletion error:", err);
-      setDeleteError(err.message || "Couldn’t delete these saved notes.");
+      console.error("Lecture deletion error:", err);
+      const errMsg = err.message || "Couldn’t delete this lecture.";
+      setDeleteError(errMsg);
+      showToast(errMsg);
+      return false;
     } finally {
       setDeletingNotes(false);
     }
@@ -1045,6 +1237,9 @@ function App() {
         isAdmin={isAdmin}
         resetWorkspace={resetWorkspace}
         openMyNotes={openMyNotes}
+        openStudySheets={openStudySheets}
+        openQuizzes={openQuizzes}
+        openChatView={openChatView}
       />
 
       {/* Main Container */}
@@ -1187,8 +1382,11 @@ function App() {
                 lectures={lectures}
                 openSavedNote={openSavedNote}
                 generateAndOpenQuiz={generateAndOpenQuiz}
+                openStudySheets={openStudySheets}
+                openQuizzes={openQuizzes}
+                openChatView={openChatView}
+                openMyNotes={openMyNotes}
                 setView={setView}
-                jumpToQuestion={jumpToQuestion}
                 selectedLecture={selectedLecture}
               />
 
@@ -1228,6 +1426,7 @@ function App() {
               openSavedNote={openSavedNote}
               openMyNotes={openMyNotes}
               handleRetryLecture={handleRetryLecture}
+              handleDeleteLecture={deleteSavedNotes}
             />
           )}
 
@@ -1270,6 +1469,28 @@ function App() {
               resetWorkspace={resetWorkspace}
               setView={setView}
               handleRetryLecture={handleRetryLecture}
+            />
+          )}
+
+          {/* VIEW 3B: DEDICATED CHAT WITH LECTURE (RAG) */}
+          {view === "chat" && (
+            <ChatView
+              lectures={lectures}
+              selectedLecture={selectedLecture}
+              selectChatLecture={selectChatLecture}
+              conversation={conversation}
+              historyLoading={historyLoading}
+              historyError={historyError}
+              question={question}
+              setQuestion={setQuestion}
+              questionSubmitting={questionSubmitting}
+              questionError={questionError}
+              setQuestionError={setQuestionError}
+              submitQuestion={submitQuestion}
+              reloadConversation={reloadConversation}
+              questionInputRef={questionInputRef}
+              resetWorkspace={resetWorkspace}
+              setView={setView}
             />
           )}
 

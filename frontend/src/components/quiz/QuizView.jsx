@@ -36,6 +36,10 @@ export default function QuizView({
   const currentQuizAnswer = quizAnswers[quizQuestionIndex];
 
   if (!quizLoading && !quiz && !quizError) {
+    const readyLectures = lectures.filter(
+      (lec) => lec.has_notes || lec.status === "completed"
+    );
+
     return (
       <section className="quiz-page" aria-label="Lecture Quiz Selection">
         <button
@@ -59,7 +63,7 @@ export default function QuizView({
             Choose a synthesized lecture below. Our AI will automatically generate an active recall quiz to test your comprehension and retention.
           </p>
 
-          {lectures && lectures.length > 0 ? (
+          {readyLectures.length > 0 ? (
             <>
               <div className="selector-dropdown-row">
                 <label htmlFor="quiz-lecture-select" className="selector-dropdown-label">
@@ -70,15 +74,14 @@ export default function QuizView({
                   className="selector-dropdown-input"
                   defaultValue=""
                   onChange={(e) => {
-                    const selected = lectures.find((l) => String(l.id) === e.target.value);
-                    if (selected) {
-                      if (generateAndOpenQuiz) generateAndOpenQuiz(selected);
-                      else if (openSavedNote) openSavedNote(selected);
+                    const selected = readyLectures.find((l) => String(l.id) === e.target.value);
+                    if (selected && generateAndOpenQuiz) {
+                      generateAndOpenQuiz(selected);
                     }
                   }}
                 >
                   <option value="" disabled>Choose a synthesized lecture to quiz...</option>
-                  {lectures.map((lec) => (
+                  {readyLectures.map((lec) => (
                     <option key={lec.id} value={lec.id}>
                       {lec.title} ({lec.audio_format || "Ready"})
                     </option>
@@ -87,7 +90,7 @@ export default function QuizView({
               </div>
 
               <div className="lecture-selector-grid">
-                {lectures.map((lec) => (
+                {readyLectures.map((lec) => (
                   <button
                     key={lec.id}
                     type="button"
@@ -201,7 +204,7 @@ export default function QuizView({
           <button
             type="button"
             className="secondary-btn"
-            onClick={generateAndOpenQuiz}
+            onClick={() => generateAndOpenQuiz()}
             disabled={quizLoading}
           >
             <RotateCcw size={16} aria-hidden="true" />

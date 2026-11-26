@@ -38,13 +38,15 @@ export default function Topbar({
               ? "Dashboard"
               : view === "my-notes"
               ? "My Notes"
+              : view === "chat"
+              ? "Chat with Lecture"
               : view === "quiz"
               ? "Lecture Quiz"
               : view === "security"
               ? "Security & Account"
               : view === "admin"
               ? "Admin Command Center"
-              : "Note Reader"}
+              : "Study Sheets"}
           </span>
         </div>
       </div>

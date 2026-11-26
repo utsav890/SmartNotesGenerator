@@ -55,7 +55,22 @@ export default function NoteReaderView({
   setView,
   handleRetryLecture,
 }) {
-  if (!selectedLecture && !notesLoading && !notesError && !notes) {
+  const isProcessing =
+    selectedLecture &&
+    !notes &&
+    (selectedLecture.status === "processing" ||
+      selectedLecture.status === "uploaded" ||
+      selectedLecture.status === "transcribed");
+
+  const isFailed =
+    selectedLecture &&
+    (selectedLecture.status === "failed" || (!notesLoading && !notes && Boolean(notesError)));
+
+  if (!notesLoading && !notes && !isProcessing && !isFailed) {
+    const readyLectures = lectures.filter(
+      (lec) => lec.has_notes || lec.status === "completed"
+    );
+
     return (
       <section className="reader-card" aria-label="Study Sheets Selection">
         <button
@@ -79,7 +94,7 @@ export default function NoteReaderView({
             Choose one of your synthesized lectures below to inspect structured notes, review key takeaways, and chat with AI Copilot.
           </p>
 
-          {lectures && lectures.length > 0 ? (
+          {readyLectures.length > 0 ? (
             <>
               <div className="selector-dropdown-row">
                 <label htmlFor="study-sheet-select" className="selector-dropdown-label">
@@ -90,12 +105,12 @@ export default function NoteReaderView({
                   className="selector-dropdown-input"
                   defaultValue=""
                   onChange={(e) => {
-                    const selected = lectures.find((l) => String(l.id) === e.target.value);
+                    const selected = readyLectures.find((l) => String(l.id) === e.target.value);
                     if (selected) openSavedNote(selected);
                   }}
                 >
                   <option value="" disabled>Choose a synthesized lecture...</option>
-                  {lectures.map((lec) => (
+                  {readyLectures.map((lec) => (
                     <option key={lec.id} value={lec.id}>
                       {lec.title} ({lec.audio_format || "Lecture Audio"})
                     </option>
@@ -104,7 +119,7 @@ export default function NoteReaderView({
               </div>
 
               <div className="lecture-selector-grid">
-                {lectures.map((lec) => (
+                {readyLectures.map((lec) => (
                   <button
                     key={lec.id}
                     type="button"
@@ -143,7 +158,7 @@ export default function NoteReaderView({
             </>
           ) : (
             <div className="selector-empty-cta">
-              <p>No synthesized lectures found in your library yet.</p>
+              <p>No synthesized study sheets found in your library yet.</p>
               <button
                 type="button"
                 className="stitch-primary-btn"
@@ -160,17 +175,6 @@ export default function NoteReaderView({
       </section>
     );
   }
-
-  const isProcessing =
-    selectedLecture &&
-    !notes &&
-    (selectedLecture.status === "processing" ||
-      selectedLecture.status === "uploaded" ||
-      selectedLecture.status === "transcribed");
-
-  const isFailed =
-    selectedLecture &&
-    (selectedLecture.status === "failed" || (!notesLoading && !notes && Boolean(notesError)));
 
   const isReady = Boolean(notes) && !isProcessing && !isFailed;
 
@@ -533,12 +537,11 @@ export default function NoteReaderView({
       >
         <div className="delete-dialog-content">
           <span className="preview-kicker danger-kicker">Irreversible Action</span>
-          <h2 id="delete-dialog-title">Delete saved notes?</h2>
+          <h2 id="delete-dialog-title">Delete lecture &amp; notes?</h2>
           <p id="delete-dialog-description">
-            This permanently removes generated note versions and Q&amp;A history for{" "}
-            <strong>{selectedLecture?.title || "this lecture"}</strong>. The
-            original lecture audio and transcript will remain safely preserved in
-            your database.
+            This permanently deletes{" "}
+            <strong>{selectedLecture?.title || "this lecture"}</strong> along with its
+            generated notes, quizzes, Q&amp;A history, and vector embeddings from your account.
           </p>
           {deleteError && (
             <p className="qa-error" role="alert">
@@ -552,7 +555,7 @@ export default function NoteReaderView({
               onClick={() => setDeleteDialogOpen(false)}
               disabled={deletingNotes}
             >
-              Keep Notes
+              Keep Lecture
             </button>
             <button
               type="button"
@@ -561,7 +564,7 @@ export default function NoteReaderView({
               disabled={deletingNotes}
               aria-busy={deletingNotes}
             >
-              {deletingNotes ? "Deleting…" : "Delete Saved Notes"}
+              {deletingNotes ? "Deleting..." : "Delete Forever"}
             </button>
           </div>
         </div>

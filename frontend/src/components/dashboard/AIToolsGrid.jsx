@@ -8,13 +8,26 @@ import {
 
 export default function AIToolsGrid({
   notes,
-  lectures,
+  lectures = [],
   openSavedNote,
   generateAndOpenQuiz,
+  openStudySheets,
+  openQuizzes,
+  openChatView,
+  openMyNotes,
   setView,
-  jumpToQuestion,
   selectedLecture,
 }) {
+  const readyLectures = lectures.filter(
+    (l) => l.status === "completed" || l.has_notes
+  );
+  const latestReadyLecture = readyLectures[0] || null;
+  const activeReadyLecture =
+    selectedLecture &&
+    (selectedLecture.status === "completed" || selectedLecture.has_notes)
+      ? selectedLecture
+      : latestReadyLecture;
+
   return (
     <section className="stitch-tools-section" aria-label="AI Study Tools">
       <div className="stitch-section-heading">
@@ -28,15 +41,12 @@ export default function AIToolsGrid({
         <div
           className="stitch-tool-card"
           onClick={() => {
-            if (notes) {
-              setView("note-reader");
+            if (activeReadyLecture) {
+              openSavedNote(activeReadyLecture);
+            } else if (openStudySheets) {
+              openStudySheets();
             } else {
-              const readyLecture = lectures.find((l) => l.status === "completed" || l.has_notes);
-              if (readyLecture) {
-                openSavedNote(readyLecture);
-              } else {
-                setView("note-reader");
-              }
+              setView("note-reader");
             }
           }}
         >
@@ -49,7 +59,7 @@ export default function AIToolsGrid({
             <span>
               {notes
                 ? "Active Sheet"
-                : lectures.some((l) => l.status === "completed" || l.has_notes)
+                : readyLectures.length > 0
                 ? "Open Latest Sheet"
                 : "Select or Ingest Lecture"}
             </span>
@@ -60,15 +70,12 @@ export default function AIToolsGrid({
         <div
           className="stitch-tool-card"
           onClick={() => {
-            if (notes) {
-              generateAndOpenQuiz();
+            if (activeReadyLecture) {
+              generateAndOpenQuiz(activeReadyLecture);
+            } else if (openQuizzes) {
+              openQuizzes();
             } else {
-              const readyLecture = lectures.find((l) => l.status === "completed" || l.has_notes);
-              if (readyLecture) {
-                generateAndOpenQuiz(readyLecture);
-              } else {
-                setView("quiz");
-              }
+              setView("quiz");
             }
           }}
         >
@@ -79,10 +86,8 @@ export default function AIToolsGrid({
           <p>Dynamic multiple-choice questions with answer analysis and scoring.</p>
           <div className="tool-footer">
             <span>
-              {notes
-                ? "Start Quiz Now"
-                : lectures.some((l) => l.status === "completed" || l.has_notes)
-                ? "Quiz Latest Lecture"
+              {activeReadyLecture
+                ? "Quiz Ready Lecture"
                 : "Select a Lecture"}
             </span>
             <ArrowRight size={16} />
@@ -92,17 +97,10 @@ export default function AIToolsGrid({
         <div
           className="stitch-tool-card"
           onClick={() => {
-            if (notes && selectedLecture) {
-              setView("note-reader");
-              setTimeout(() => jumpToQuestion(), 200);
+            if (openChatView) {
+              openChatView(activeReadyLecture);
             } else {
-              const readyLecture = lectures.find((l) => l.status === "completed" || l.has_notes);
-              if (readyLecture) {
-                openSavedNote(readyLecture);
-                setTimeout(() => jumpToQuestion(), 250);
-              } else {
-                setView("note-reader");
-              }
+              setView("chat");
             }
           }}
         >
@@ -120,15 +118,12 @@ export default function AIToolsGrid({
         <div
           className="stitch-tool-card"
           onClick={() => {
-            if (notes) {
-              setView("note-reader");
+            if (activeReadyLecture) {
+              openSavedNote(activeReadyLecture);
+            } else if (openMyNotes) {
+              openMyNotes();
             } else {
-              const readyLecture = lectures.find((l) => l.status === "completed" || l.has_notes);
-              if (readyLecture) {
-                openSavedNote(readyLecture);
-              } else {
-                setView("my-notes");
-              }
+              setView("my-notes");
             }
           }}
         >

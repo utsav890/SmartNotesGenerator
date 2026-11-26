@@ -37,6 +37,7 @@ from app.transcription import transcribe_audio
 from app.notes_generator import answer_question, generate_notes
 from app.pipeline import process_transcript
 from app.rag import retrieve_context
+from app.qdrant_service import delete_lecture_chunks
 from app.models import (
     User,
     Lecture,
@@ -1478,6 +1479,7 @@ def get_lecture_detail(
 # --------------------------------------------------
 
 @app.get("/lectures/{lecture_id}/questions")
+@app.get("/api/lectures/{lecture_id}/questions")
 def get_lecture_questions(
     lecture_id: int,
     current_user: User = Depends(get_current_user),
@@ -1506,6 +1508,7 @@ def get_lecture_questions(
 
 
 @app.post("/lectures/{lecture_id}/questions")
+@app.post("/api/lectures/{lecture_id}/questions")
 def ask_lecture_question(
     lecture_id: int,
     request: LectureQuestionRequest,
@@ -1619,14 +1622,18 @@ def ask_lecture_question(
     try:
 
         # --------------------------------------------------
-        # RAG RETRIEVAL
+        # RAG RETRIEVAL (with graceful transcript fallback)
         # --------------------------------------------------
 
-        retrieved_chunks = retrieve_context(
-            lecture_id=lecture_id,
-            query=question,
-            limit=5
-        )
+        retrieved_chunks = []
+        try:
+            retrieved_chunks = retrieve_context(
+                lecture_id=lecture_id,
+                query=question,
+                limit=5
+            )
+        except Exception as qdrant_err:
+            logger.warning("Qdrant retrieval skipped for lecture %s: %s", lecture_id, qdrant_err)
 
         # Convert retrieved chunks into LLM context
         context = "\n\n".join(
@@ -1776,7 +1783,70 @@ def ask_lecture_question(
     
 
 
+@app.delete("/lectures/{lecture_id}")
+@app.delete("/api/lectures/{lecture_id}")
+def delete_lecture(
+    lecture_id: int,
+    current_user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """Permanently delete a lecture, its notes, quizzes, Q&A messages, transcripts, audio file, and Qdrant vectors."""
+    lecture = get_user_lecture(lecture_id, current_user, db)
+
+    try:
+        # Clean up Qdrant vector chunks (non-blocking if vector DB unreachable)
+        delete_lecture_chunks(lecture_id)
+
+        # Clean up child database records cleanly
+        quiz_ids = [
+            q.id for q in db.query(Quiz.id).filter(Quiz.lecture_id == lecture_id).all()
+        ]
+        if quiz_ids:
+            db.query(QuizQuestion).filter(
+                QuizQuestion.quiz_id.in_(quiz_ids)
+            ).delete(synchronize_session=False)
+            db.query(Quiz).filter(
+                Quiz.lecture_id == lecture_id
+            ).delete(synchronize_session=False)
+
+        db.query(LectureMessage).filter(
+            LectureMessage.lecture_id == lecture_id
+        ).delete(synchronize_session=False)
+        db.query(Note).filter(
+            Note.lecture_id == lecture_id
+        ).delete(synchronize_session=False)
+        db.query(Transcript).filter(
+            Transcript.lecture_id == lecture_id
+        ).delete(synchronize_session=False)
+
+        audio_path = getattr(lecture, "audio_path", None)
+        db.delete(lecture)
+        db.commit()
+
+        if audio_path:
+            try:
+                p = Path(audio_path)
+                if p.is_file():
+                    p.unlink()
+            except Exception as fs_err:
+                logger.warning("Could not delete audio file %s: %s", audio_path, fs_err)
+
+    except SQLAlchemyError as error:
+        db.rollback()
+        logger.exception("Could not delete lecture %s", lecture_id)
+        raise HTTPException(
+            status_code=500,
+            detail="Could not delete this lecture. Please try again."
+        ) from error
+
+    return {
+        "message": "Lecture, notes, quizzes, and vector memory permanently deleted.",
+        "lecture_id": lecture_id
+    }
+
+
 @app.delete("/lectures/{lecture_id}/notes")
+@app.delete("/api/lectures/{lecture_id}/notes")
 def delete_lecture_notes(
     lecture_id: int,
     current_user: User = Depends(get_current_user),
@@ -1791,6 +1861,10 @@ def delete_lecture_notes(
         db.query(LectureMessage).filter(
             LectureMessage.lecture_id == lecture_id
         ).delete(synchronize_session=False)
+
+        # Reset lecture status so it no longer shows as Notes Ready
+        has_transcript = db.query(Transcript.id).filter(Transcript.lecture_id == lecture_id).first() is not None
+        setattr(lecture, "status", "transcribed" if has_transcript else "uploaded")
         db.commit()
     except SQLAlchemyError as error:
         db.rollback()
@@ -1888,6 +1962,7 @@ def create_flashcards(
         )
         
 @app.post("/lectures/{lecture_id}/quiz")
+@app.post("/api/lectures/{lecture_id}/quiz")
 def create_quiz(
     lecture_id: int,
     request: Request,
@@ -1904,25 +1979,33 @@ def create_quiz(
         Note.id.desc()
     ).first()
 
-    if not latest_note:
+    quiz_context = ""
+    if latest_note and latest_note.content:
+        quiz_context = (
+            latest_note.content
+            if isinstance(latest_note.content, str)
+            else json.dumps(latest_note.content, ensure_ascii=False)
+        )
+    elif latest_note and latest_note.summary:
+        quiz_context = str(latest_note.summary)
+
+    # Clean fallback to transcript if notes/content are empty
+    if not quiz_context.strip():
+        transcript_record = db.query(Transcript).filter(
+            Transcript.lecture_id == lecture_id
+        ).first()
+        if transcript_record and transcript_record.transcript_text:
+            quiz_context = str(transcript_record.transcript_text).strip()
+
+    if not quiz_context.strip():
         raise HTTPException(
-            status_code=404,
-            detail="Generate notes before creating a quiz"
+            status_code=400,
+            detail="This lecture does not have generated notes or a transcript yet. Generate notes first."
         )
 
     try:
-
-        note_content = (
-            latest_note.content
-            if isinstance(latest_note.content, str)
-            else json.dumps(
-                latest_note.content,
-                ensure_ascii=False
-            )
-        )
-
         generated = generate_quiz(
-            note_content,
+            quiz_context,
             count=10
         )
 
@@ -1992,6 +2075,7 @@ def create_quiz(
         )
         
 @app.get("/lectures/{lecture_id}/quiz")
+@app.get("/api/lectures/{lecture_id}/quiz")
 def get_quiz(
     lecture_id: int,
     current_user: User = Depends(get_current_user),
