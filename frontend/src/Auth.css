@@ -1542,11 +1542,13 @@
   color: #0f172a;
 }
 
-[data-theme="light"] .auth-title {
+[data-theme="light"] .auth-title,
+[data-theme="light"] .auth-card-title {
   color: #0f172a;
 }
 
-[data-theme="light"] .auth-subtitle {
+[data-theme="light"] .auth-subtitle,
+[data-theme="light"] .auth-card-subtitle {
   color: #475569;
 }
 

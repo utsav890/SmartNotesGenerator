@@ -58,12 +58,16 @@
 /* Tabs */
 .admin-tabs {
   display: flex;
+  flex-wrap: nowrap;
   gap: 0.4rem;
   padding: 4px;
   background: var(--surface);
   border: 1px solid var(--border);
   border-radius: var(--radius-md, 12px);
   overflow-x: auto;
+  max-width: 100%;
+  box-sizing: border-box;
+  scrollbar-width: thin;
 }
 
 .admin-tab {
@@ -80,6 +84,7 @@
   cursor: pointer;
   transition: all var(--transition-fast, 150ms);
   white-space: nowrap;
+  flex-shrink: 0;
 }
 
 .admin-tab:hover {

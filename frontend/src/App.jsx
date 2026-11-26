@@ -258,7 +258,7 @@ function App() {
           ? "/dashboard"
           : rawTarget;
         navigate(target, { replace: true });
-      } else if (pathname === "/settings" || pathname === "/settings/security") {
+      } else if (pathname === "/account" || pathname === "/settings" || pathname === "/settings/security") {
         setView("security");
       } else if (pathname === "/admin") {
         if (!isAdmin) {
@@ -266,10 +266,12 @@ function App() {
         } else {
           setView("admin");
         }
-      } else if (pathname === "/lectures" || pathname === "/notes") {
+      } else if (pathname === "/notes" || pathname === "/lectures") {
         setView("my-notes");
-      } else if (pathname.startsWith("/lecture/")) {
+      } else if (pathname === "/study-sheets" || pathname === "/chat" || pathname.startsWith("/lecture/")) {
         setView("note-reader");
+      } else if (pathname === "/quizzes") {
+        setView("quiz");
       } else if (pathname === "/" || pathname === "/dashboard") {
         setView("dashboard");
       }
@@ -551,6 +553,23 @@ function App() {
         throw new Error("Upload response is missing lecture_id or saved_filename.");
       }
 
+      // Immediately sync the newly uploaded lecture into Recent Lectures as Processing (1)
+      setLectures((prev) => {
+        if (prev.some((l) => l.id === id)) return prev;
+        return [
+          {
+            id,
+            title: file.name,
+            status: "processing",
+            has_notes: false,
+            created_at: new Date().toISOString(),
+            audio_format: file.name.split(".").pop()?.toUpperCase() || "AUDIO",
+          },
+          ...prev,
+        ];
+      });
+      fetchLecturesAndStats();
+
       setStatus("Transcribing audio with OpenAI Whisper...");
       await apiRequest(`/transcribe/${encodeURIComponent(filename)}`, {
         method: "POST",
@@ -572,6 +591,7 @@ function App() {
       console.error("Audio workflow error:", err);
       setError(err.message || "Failed to generate notes.");
       setStatus("");
+      fetchLecturesAndStats();
     } finally {
       setLoading(false);
     }
@@ -613,8 +633,8 @@ function App() {
   const openMyNotes = async () => {
     if (loading || notesLoading) return;
 
-    if (pathname !== "/lectures") {
-      navigate("/lectures");
+    if (pathname !== "/notes") {
+      navigate("/notes");
     }
     setView("my-notes");
     setMobileMenuOpen(false);
@@ -1015,6 +1035,7 @@ function App() {
       <Sidebar
         view={view}
         setView={setView}
+        navigate={navigate}
         mobileMenuOpen={mobileMenuOpen}
         setMobileMenuOpen={setMobileMenuOpen}
         theme={theme}

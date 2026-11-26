@@ -16,6 +16,7 @@ import {
 export default function Sidebar({
   view,
   setView,
+  navigate,
   mobileMenuOpen,
   setMobileMenuOpen,
   theme,
@@ -26,11 +27,16 @@ export default function Sidebar({
   resetWorkspace,
   openMyNotes,
 }) {
-  const handleNav = (targetView, action) => {
+  const handleNav = (targetView, routePath, action) => {
     if (action) {
       action();
-    } else if (targetView) {
-      setView(targetView);
+    } else {
+      if (routePath && navigate) {
+        navigate(routePath);
+      }
+      if (targetView) {
+        setView(targetView);
+      }
     }
     setMobileMenuOpen(false);
   };
@@ -60,7 +66,7 @@ export default function Sidebar({
           <button
             type="button"
             className={`stitch-nav-item${view === "dashboard" ? " active" : ""}`}
-            onClick={() => handleNav("dashboard", resetWorkspace)}
+            onClick={() => handleNav("dashboard", "/dashboard", resetWorkspace)}
           >
             <LayoutDashboard size={18} />
             <span>Dashboard</span>
@@ -68,7 +74,7 @@ export default function Sidebar({
           <button
             type="button"
             className={`stitch-nav-item${view === "my-notes" ? " active" : ""}`}
-            onClick={() => handleNav("my-notes", openMyNotes)}
+            onClick={() => handleNav("my-notes", "/notes", openMyNotes)}
           >
             <FileText size={18} />
             <span>My Notes</span>
@@ -76,7 +82,7 @@ export default function Sidebar({
           <button
             type="button"
             className={`stitch-nav-item${view === "note-reader" ? " active" : ""}`}
-            onClick={() => handleNav("note-reader")}
+            onClick={() => handleNav("note-reader", "/study-sheets")}
           >
             <FileText size={18} />
             <span>Study Sheets</span>
@@ -84,7 +90,7 @@ export default function Sidebar({
           <button
             type="button"
             className={`stitch-nav-item${view === "quiz" ? " active" : ""}`}
-            onClick={() => handleNav("quiz")}
+            onClick={() => handleNav("quiz", "/quizzes")}
           >
             <Brain size={18} />
             <span>Quizzes</span>
@@ -94,7 +100,7 @@ export default function Sidebar({
           <button
             type="button"
             className="stitch-nav-item"
-            onClick={() => handleNav("dashboard", resetWorkspace)}
+            onClick={() => handleNav("dashboard", "/dashboard", resetWorkspace)}
           >
             <FileAudio size={18} />
             <span>Transcribe Audio</span>
@@ -102,7 +108,7 @@ export default function Sidebar({
           <button
             type="button"
             className="stitch-nav-item"
-            onClick={() => handleNav("dashboard", resetWorkspace)}
+            onClick={() => handleNav("dashboard", "/dashboard", resetWorkspace)}
           >
             <Sparkles size={18} />
             <span>Generate Notes</span>
@@ -112,10 +118,12 @@ export default function Sidebar({
             className="stitch-nav-item"
             onClick={() => {
               if (view === "note-reader") {
+                if (navigate) navigate("/chat");
                 const el = document.getElementById("lecture-question");
                 if (el) el.focus();
+                setMobileMenuOpen(false);
               } else {
-                handleNav("my-notes", openMyNotes);
+                handleNav("note-reader", "/chat");
               }
             }}
           >
@@ -137,7 +145,7 @@ export default function Sidebar({
           <button
             type="button"
             className={`stitch-nav-item${view === "security" ? " active" : ""}`}
-            onClick={() => handleNav("security")}
+            onClick={() => handleNav("security", "/account")}
           >
             <Shield size={18} />
             <span>Security &amp; Account</span>
@@ -147,7 +155,7 @@ export default function Sidebar({
             <button
               type="button"
               className={`stitch-nav-item${view === "admin" ? " active" : ""}`}
-              onClick={() => handleNav("admin")}
+              onClick={() => handleNav("admin", "/admin")}
             >
               <ShieldAlert size={18} color="var(--stitch-primary)" />
               <span>Admin Panel</span>
