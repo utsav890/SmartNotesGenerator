@@ -1,103 +1,55 @@
-import os
-import json
+from typing import Literal
 
-from dotenv import load_dotenv
-from groq import Groq
+from pydantic import BaseModel
 
-
-load_dotenv()
+from app.gemini_client import generate_gemini_json, get_gemini_client
 
 
-def get_groq_client():
-    return Groq(
-        api_key=os.getenv("GROQ_API_KEY")
-    )
+class QuizOptionsSchema(BaseModel):
+    A: str
+    B: str
+    C: str
+    D: str
 
 
-def generate_quiz(
-    notes_context: str,
-    count: int = 10
-):
+class QuizQuestionSchema(BaseModel):
+    question: str
+    options: QuizOptionsSchema
+    correct_answer: Literal["A", "B", "C", "D"]
+    explanation: str
 
-    client = get_groq_client()
 
-    prompt = f"""
-Create exactly {count} multiple-choice questions
-from the lecture material below.
+class QuizResponseSchema(BaseModel):
+    questions: list[QuizQuestionSchema]
+
+
+def generate_quiz(notes_context: str, count: int = 10) -> dict:
+    """Generate active-recall multiple-choice quiz questions grounded in lecture material via Gemini."""
+    client = get_gemini_client()
+
+    prompt = f"""Create exactly {count} multiple-choice questions from the lecture material below.
 
 Rules:
 - Use ONLY the provided lecture material.
 - Do not use outside knowledge.
-- Each question must have exactly 4 options.
-- Only one option can be correct.
-- Include a short explanation.
-- Questions should cover important lecture concepts.
-- Return valid JSON only.
-
-Required format:
-
-{{
-    "questions": [
-        {{
-            "question": "Question",
-            "options": {{
-                "A": "Option A",
-                "B": "Option B",
-                "C": "Option C",
-                "D": "Option D"
-            }},
-            "correct_answer": "A",
-            "explanation": "Short explanation"
-        }}
-    ]
-}}
+- Each question must have exactly 4 options labeled A, B, C, D.
+- Only one option can be correct ("A", "B", "C", or "D").
+- Include a short explanation for each answer.
 
 LECTURE MATERIAL:
 
-{notes_context}
-"""
+{notes_context}"""
 
-    response = client.chat.completions.create(
-        model="qwen/qwen3.8-27b",
-        messages=[
-            {
-                "role": "system",
-                "content": (
-                    "You are a lecture quiz generator. "
-                    "Create accurate questions using only "
-                    "the provided lecture material."
-                )
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
+    result = generate_gemini_json(
+        client,
+        contents=prompt,
+        system_instruction="You are a lecture quiz generator. Create accurate questions using only the provided lecture material.",
         temperature=0.2,
-        response_format={
-            "type": "json_object"
-        }
+        response_schema=QuizResponseSchema,
     )
 
-    content = response.choices[0].message.content
-
-    if not content:
-        raise ValueError(
-            "Empty quiz response from LLM"
-        )
-
-    result = json.loads(content)
-
-    questions = result.get(
-        "questions",
-        []
-    )
-
+    questions = result.get("questions", [])
     if not questions:
-        raise ValueError(
-            "No quiz questions generated"
-        )
+        raise ValueError("No quiz questions generated")
 
-    return {
-        "questions": questions[:count]
-    }
+    return {"questions": questions[:count]}

@@ -4,14 +4,15 @@ Covers:
 - Transcript cleaning and noise removal (cleaner.py)
 - Topic segmentation and chunking (segmentor.py)
 - Content coverage verification (coverage_checker.py)
-- Mocked Whisper audio transcription flow
-- Mocked Groq LLM note synthesis (notes_generator.py)
+- Mocked Google Gemini native audio transcription flow
+- Mocked Google Gemini structured note synthesis (notes_generator.py)
 - Mocked RAG retrieval and Q&A context assembly (rag.py & notes_generator.py)
-- Mocked Quiz & Flashcard generation (quiz.py & flashcard.py)
+- Mocked Quiz & Flashcard generation via Gemini (quiz.py & flashcard.py)
 """
 
 import os
 import unittest
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 from app.cleaner import clean_transcript
@@ -24,7 +25,8 @@ from app.flashcard import generate_flashcards
 class TestPipelineAndAI(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
-        os.environ["GROQ_API_KEY"] = "gsk_ci_mock_test_key_for_automated_testing_12345"
+        os.environ["GEMINI_API_KEY"] = "gemini_ci_mock_test_key_for_automated_testing_12345"
+
     def test_01_clean_transcript_noise_and_markers(self):
         """Verify cleaner removes transcription artifacts, noise markers and excessive spaces."""
         raw = "Hello everyone... [applause]   Welcome to class [inaudible] ..   Today we cover AI."
@@ -67,8 +69,7 @@ class TestPipelineAndAI(unittest.TestCase):
                     "sections": [
                         {
                             "heading": "Neural Networks",
-                            "summary": "Neural networks use activation functions like ReLU and backpropagation.",
-                            "points": ["Backpropagation computes gradients"]
+                            "content": "Neural networks use activation functions like ReLU and backpropagation.",
                         }
                     ]
                 }
@@ -79,74 +80,75 @@ class TestPipelineAndAI(unittest.TestCase):
         self.assertGreaterEqual(res["coverage_percentage"], 0.0)
         self.assertIn("covered_segments", res)
 
-    @patch("app.transcription.load_model")
-    def test_06_mocked_whisper_transcription(self, mock_load):
-        """Verify Whisper transcription workflow with mocked model inference."""
+    @patch("app.transcription.get_gemini_client")
+    def test_06_mocked_gemini_audio_transcription(self, mock_get_client):
+        """Verify native Gemini audio transcription workflow for inline audio files."""
         from app.transcription import transcribe_audio
-        mock_model = MagicMock()
-        mock_model.transcribe.return_value = {
-            "text": "This is a transcribed lecture on microeconomics.",
-            "language": "en"
-        }
-        mock_load.return_value = mock_model
 
-        with patch("pathlib.Path.is_file", return_value=True):
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text='{"transcript": "This is a transcribed lecture on microeconomics.", "language": "en"}'
+        )
+
+        with patch("pathlib.Path.is_file", return_value=True), patch(
+            "pathlib.Path.stat", return_value=SimpleNamespace(st_size=2048)
+        ), patch("pathlib.Path.read_bytes", return_value=b"ID3mockaudio"):
             result = transcribe_audio("dummy_lecture.mp3")
             self.assertEqual(result["transcript"], "This is a transcribed lecture on microeconomics.")
             self.assertEqual(result["language"], "en")
+            mock_client.models.generate_content.assert_called_once()
 
-    @patch("app.notes_generator.get_groq_client")
+    @patch("app.notes_generator.get_gemini_client")
     def test_07_mocked_notes_generation(self, mock_get_client):
-        """Verify structured notes generation produces required Pydantic-compliant schema."""
+        """Verify structured notes generation produces required JSON schema including bold-lead bullets."""
         from app.notes_generator import generate_notes
 
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
-
-        mock_completion = MagicMock()
-        mock_completion.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content="""{
-                        "title": "Deep Learning Basics",
-                        "summary": "Comprehensive overview of neural architectures.",
-                        "sections": [{"heading": "Perceptrons", "summary": "Basic unit", "points": ["Linear sum"]}],
-                        "key_points": ["Weights adjust via backprop"],
-                        "glossary": [{"term": "ReLU", "definition": "Rectified Linear Unit"}],
-                        "revision_questions": ["What is backpropagation?"]
-                    }"""
-                )
-            )
-        ]
-        mock_client.chat.completions.create.return_value = mock_completion
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="""{
+                "title": "Deep Learning Basics",
+                "summary": "Comprehensive overview of neural architectures.",
+                "sections": [
+                    {
+                        "heading": "Perceptrons",
+                        "intro": "Artificial neurons compute weighted linear combinations.",
+                        "bullets": [
+                            {"label": "Weighted Sum", "detail": "Inputs are multiplied by weights plus bias."},
+                            {"label": "Activation", "detail": "ReLU introduces non-linearity."}
+                        ],
+                        "content": ""
+                    }
+                ],
+                "key_points": ["Weights adjust via backprop"],
+                "glossary": [{"term": "ReLU", "definition": "Rectified Linear Unit"}],
+                "revision_questions": [{"question": "What is backpropagation?", "answer": "Gradient computation via chain rule."}]
+            }"""
+        )
 
         notes = generate_notes("Sample lecture text about neural networks.")
         self.assertEqual(notes["title"], "Deep Learning Basics")
-        self.assertIn("sections", notes)
         self.assertEqual(len(notes["sections"]), 1)
+        self.assertEqual(len(notes["sections"][0]["bullets"]), 2)
+        self.assertEqual(notes["sections"][0]["bullets"][0]["label"], "Weighted Sum")
+        self.assertIn("Weighted Sum: Inputs are multiplied", notes["sections"][0]["content"])
         self.assertEqual(notes["glossary"][0]["term"], "ReLU")
 
-    @patch("app.notes_generator.get_groq_client")
+    @patch("app.notes_generator.get_gemini_client")
     def test_08_mocked_answer_question_rag(self, mock_get_client):
         """Verify RAG question answering formats context, retrieved sources, and returns confidence."""
         from app.notes_generator import answer_question
 
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
-
-        mock_completion = MagicMock()
-        mock_completion.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content="""{
-                        "answer": "Backpropagation calculates error gradients using the chain rule.",
-                        "sources": ["Lecture Section 2"],
-                        "confidence": "high"
-                    }"""
-                )
-            )
-        ]
-        mock_client.chat.completions.create.return_value = mock_completion
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="""{
+                "answer": "Backpropagation calculates error gradients using the chain rule.",
+                "sources": ["Lecture Section 2"],
+                "confidence": "high"
+            }"""
+        )
 
         res = answer_question(
             question="How does backpropagation work?",
@@ -157,35 +159,28 @@ class TestPipelineAndAI(unittest.TestCase):
         self.assertIn("Backpropagation", res["answer"])
         self.assertEqual(res["confidence"], "high")
 
-    @patch("app.quiz.get_groq_client")
+    @patch("app.quiz.get_gemini_client")
     def test_09_mocked_quiz_generation(self, mock_get_client):
         """Verify quiz generator parses multiple choice questions, options, and explanations."""
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
-
-        mock_completion = MagicMock()
-        mock_completion.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content="""{
-                        "questions": [
-                            {
-                                "question": "What is the primary role of ATP?",
-                                "options": {
-                                    "A": "Energy storage",
-                                    "B": "Genetic blueprint",
-                                    "C": "Cellular respiration fuel",
-                                    "D": "Structural component"
-                                },
-                                "correct_answer": "A",
-                                "explanation": "ATP is the primary biochemical energy currency."
-                            }
-                        ]
-                    }"""
-                )
-            )
-        ]
-        mock_client.chat.completions.create.return_value = mock_completion
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="""{
+                "questions": [
+                    {
+                        "question": "What is the primary role of ATP?",
+                        "options": {
+                            "A": "Energy storage",
+                            "B": "Genetic blueprint",
+                            "C": "Cellular respiration fuel",
+                            "D": "Structural component"
+                        },
+                        "correct_answer": "A",
+                        "explanation": "ATP is the primary biochemical energy currency."
+                    }
+                ]
+            }"""
+        )
 
         res = generate_quiz("Lecture notes content on ATP synthesis.", count=1)
         self.assertIn("questions", res)
@@ -193,30 +188,58 @@ class TestPipelineAndAI(unittest.TestCase):
         self.assertEqual(q["correct_answer"], "A")
         self.assertEqual(q["options"]["A"], "Energy storage")
 
-    @patch("app.flashcard.get_groq_client")
+    @patch("app.flashcard.get_gemini_client")
     def test_10_mocked_flashcard_generation(self, mock_get_client):
         """Verify flashcard generator produces question and answer pairs."""
         mock_client = MagicMock()
         mock_get_client.return_value = mock_client
-
-        mock_completion = MagicMock()
-        mock_completion.choices = [
-            MagicMock(
-                message=MagicMock(
-                    content="""{
-                        "flashcards": [
-                            {
-                                "question": "What is an artificial neuron?",
-                                "answer": "A mathematical model receiving weighted inputs plus bias."
-                            }
-                        ]
-                    }"""
-                )
-            )
-        ]
-        mock_client.chat.completions.create.return_value = mock_completion
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text="""{
+                "flashcards": [
+                    {
+                        "question": "What is an artificial neuron?",
+                        "answer": "A mathematical model receiving weighted inputs plus bias."
+                    }
+                ]
+            }"""
+        )
 
         res = generate_flashcards("Perceptron mathematical definition.", count=1)
         self.assertIn("flashcards", res)
         self.assertEqual(len(res["flashcards"]), 1)
         self.assertIn("mathematical model", res["flashcards"][0]["answer"])
+
+    @patch("app.transcription.get_gemini_client")
+    def test_11_mocked_gemini_large_audio_files_upload(self, mock_get_client):
+        """Verify audio files >15MB use Gemini Files API upload and delete uploaded handle."""
+        from app.transcription import transcribe_audio
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.files.upload.return_value = SimpleNamespace(name="files/audio-123")
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text='{"transcript": "Large lecture audio transcript.", "language": "en"}'
+        )
+
+        with patch("pathlib.Path.is_file", return_value=True), patch(
+            "pathlib.Path.stat", return_value=SimpleNamespace(st_size=18 * 1024 * 1024)
+        ):
+            result = transcribe_audio("large_lecture.mp3")
+            self.assertEqual(result["transcript"], "Large lecture audio transcript.")
+            mock_client.files.upload.assert_called_once()
+            mock_client.files.delete.assert_called_once_with(name="files/audio-123")
+
+    @patch("app.coverage_checker.get_gemini_client")
+    def test_12_mocked_gemini_coverage_audit(self, mock_get_client):
+        """Verify Gemini semantic coverage validation enforces JSON output cleanly."""
+        from app.coverage_checker import verify_coverage_with_gemini
+
+        mock_client = MagicMock()
+        mock_get_client.return_value = mock_client
+        mock_client.models.generate_content.return_value = SimpleNamespace(
+            text='{"covered": true, "coverage_percentage": 95.0, "missing_topics": []}'
+        )
+
+        res = verify_coverage_with_gemini(["Neural network gradients"], [{"notes": {"summary": "Neural network gradients overview"}}])
+        self.assertTrue(res["semantic_covered"])
+        self.assertEqual(res["semantic_missing_topics"], [])

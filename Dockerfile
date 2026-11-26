@@ -29,7 +29,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install system dependencies (FFmpeg is mandatory for Whisper audio transcription)
+# Install system dependencies (FFmpeg supports audio/video stream extraction if needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     gcc \

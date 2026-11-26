@@ -1,6 +1,6 @@
 # ==============================================================================
 # SmartNotes AI - Backend Dockerfile
-# Optimized for FastAPI, Whisper Audio (with FFmpeg), PyTorch, and SQLAlchemy
+# Optimized for FastAPI, Google Gemini AI, Sentence Transformers, and SQLAlchemy
 # ==============================================================================
 FROM python:3.11-slim
 
@@ -11,7 +11,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# Install system dependencies (ffmpeg is mandatory for Whisper audio processing)
+# Install system dependencies (FFmpeg supports audio/video stream extraction if needed)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
     gcc \

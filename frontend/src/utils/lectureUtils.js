@@ -1,3 +1,19 @@
+export const MAX_MEDIA_FILE_SIZE_BYTES = 300 * 1024 * 1024;
+export const ALLOWED_MEDIA_EXTENSIONS = [".mp3", ".wav", ".m4a", ".mp4", ".ogg", ".webm", ".flac", ".aac"];
+
+export function validateMediaFile(file) {
+  if (!file) return "Please select an audio or MP4 file first.";
+  const ext = `.${(file.name.split(".").pop() || "").toLowerCase()}`;
+  if (!ALLOWED_MEDIA_EXTENSIONS.includes(ext)) {
+    return "Unsupported format. Please upload MP3, WAV, M4A, MP4, OGG, WEBM, FLAC, or AAC.";
+  }
+  if (file.size === 0) return "The selected file is empty.";
+  if (file.size > MAX_MEDIA_FILE_SIZE_BYTES) {
+    return "File size must not exceed 300 MB.";
+  }
+  return "";
+}
+
 export const API_BASE_URL =
   import.meta.env.VITE_API_BASE_URL !== undefined
     ? import.meta.env.VITE_API_BASE_URL
@@ -32,24 +48,24 @@ Finally, the grand finale of energy production is Oxidative Phosphorylation alon
 
 export const PROCESSING_STAGES = [
   { id: 1, name: "Audio Uploaded" },
-  { id: 2, name: "Whisper Transcription" },
+  { id: 2, name: "Gemini Audio Transcription" },
   { id: 3, name: "Transcript Cleaning" },
   { id: 4, name: "Topic Segmentation" },
   { id: 5, name: "Embedding Generation" },
   { id: 6, name: "Qdrant Storage" },
-  { id: 7, name: "Groq Notes Generation" },
+  { id: 7, name: "Gemini Notes Generation" },
   { id: 8, name: "Coverage Validation" },
   { id: 9, name: "Completed" }
 ];
 
 const STAGE_RULES = [
   [["upload"], 1],
-  [["whisper", "transcrib"], 2],
+  [["audio", "transcrib"], 2],
   [["clean"], 3],
   [["segment"], 4],
   [["embed"], 5],
   [["qdrant", "vector"], 6],
-  [["groq", "generat"], 7],
+  [["gemini", "generat"], 7],
   [["cover", "validat", "loading"], 8],
   [["ready", "success"], 9]
 ];
@@ -116,11 +132,22 @@ export function formatDate(dateStr) {
 
 export function buildNotesExportText(notes, { markdown = false } = {}) {
   if (!notes) return "";
-  const sections = (notes.sections || []).flatMap((section, idx) =>
-    markdown
-      ? [`### ${idx + 1}. ${section.heading || `Section ${idx + 1}`}\n${section.content || ""}`]
-      : ["", `[${idx + 1}] ${section.heading || `Section ${idx + 1}`}`, section.content || ""]
-  );
+  const sections = (notes.sections || []).flatMap((section, idx) => {
+    const titleLine = markdown
+      ? `### ${idx + 1}. ${section.heading || `Section ${idx + 1}`}`
+      : `[${idx + 1}] ${section.heading || `Section ${idx + 1}`}`;
+    const bulletLines =
+      Array.isArray(section.bullets) && section.bullets.length > 0
+        ? section.bullets.map((b) => {
+            if (markdown) {
+              return b.label ? `- **${b.label}:** ${b.detail}` : `- ${b.detail}`;
+            }
+            return b.label ? `• ${b.label}: ${b.detail}` : `• ${b.detail}`;
+          })
+        : [section.content || ""];
+    const bodyLines = [...(section.intro ? [section.intro] : []), ...bulletLines];
+    return markdown ? [titleLine, ...bodyLines, ""] : ["", titleLine, ...bodyLines];
+  });
   const keyPoints = (notes.key_points || []).map((k) => `${markdown ? "-" : "•"} ${k}`);
   const revision = (notes.revision_questions || []).map((q, idx) => {
     const qText = typeof q === "object" ? q.question : q;

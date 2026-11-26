@@ -319,8 +319,12 @@ def _run_background_database_init():
 
 
 def on_startup():
-    """Validate security secrets immediately and launch background database schema initialization."""
+    """Validate security/AI configuration immediately and launch background database schema initialization."""
     get_and_validate_jwt_secret()
+    if not os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip() == "your_gemini_api_key_here":
+        logger.warning(
+            "GEMINI_API_KEY is not configured; Gemini audio transcription, note synthesis, quizzes, and Q&A will be unavailable."
+        )
 
     # Offload blocking database operations to background daemon thread so Uvicorn binds port immediately
     init_thread = threading.Thread(target=_run_background_database_init, daemon=True)
@@ -432,7 +436,8 @@ ALLOWED_EXTENSIONS = {
     ".aac",
 }
 
-MAX_FILE_SIZE = 50 * 1024 * 1024
+MAX_FILE_SIZE = 300 * 1024 * 1024
+UPLOAD_CHUNK_SIZE = 1024 * 1024
 
 
 def validate_audio_magic_bytes(contents: bytes, extension: str) -> bool:
@@ -655,28 +660,40 @@ async def upload_audio(
     if extension not in ALLOWED_EXTENSIONS:
         raise HTTPException(status_code=400, detail="Unsupported audio format")
 
-    contents = await file.read()
-    if not contents:
-        raise HTTPException(status_code=400, detail="The uploaded file is empty")
-    if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(status_code=413, detail="File size must not exceed 50 MB")
-    if not validate_audio_magic_bytes(contents, extension):
-        raise HTTPException(
-            status_code=400,
-            detail="File content does not match the audio format extension. Disguised files are rejected."
-        )
-
     saved_filename = f"{uuid4().hex}{extension}"
     file_path = UPLOAD_DIR / saved_filename
+    total_bytes = 0
+    header_bytes = b""
 
     try:
-        file_path.write_bytes(contents)
+        with file_path.open("wb") as out_file:
+            while chunk := await file.read(UPLOAD_CHUNK_SIZE):
+                if len(header_bytes) < 64:
+                    header_bytes += chunk[: 64 - len(header_bytes)]
+                    if total_bytes == 0 and len(header_bytes) >= 4 and not validate_audio_magic_bytes(header_bytes, extension):
+                        raise HTTPException(
+                            status_code=400,
+                            detail="File content does not match the audio format extension. Disguised files are rejected."
+                        )
+                total_bytes += len(chunk)
+                if total_bytes > MAX_FILE_SIZE:
+                    raise HTTPException(status_code=413, detail="File size must not exceed 300 MB")
+                out_file.write(chunk)
+
+        if total_bytes == 0:
+            raise HTTPException(status_code=400, detail="The uploaded file is empty")
+        if not validate_audio_magic_bytes(header_bytes, extension):
+            raise HTTPException(
+                status_code=400,
+                detail="File content does not match the audio format extension. Disguised files are rejected."
+            )
+
         lecture = Lecture(
             user_id=current_user.id,
             title=Path(original_name).stem,
             audio_path=str(file_path),
             audio_format=extension.lstrip("."),
-            file_size=len(contents),
+            file_size=total_bytes,
             status="uploaded"
         )
         db.add(lecture)
@@ -687,9 +704,14 @@ async def upload_audio(
             "lecture_id": lecture.id,
             "original_filename": original_name,
             "saved_filename": saved_filename,
-            "file_size_bytes": len(contents),
+            "file_size_bytes": total_bytes,
             "status": lecture.status
         }
+    except HTTPException:
+        db.rollback()
+        if file_path.exists():
+            file_path.unlink()
+        raise
     except Exception as error:
         db.rollback()
         if file_path.exists():
@@ -830,7 +852,7 @@ def run_lecture_synthesis(lecture_id: int, user_id: int):
                 if not lecture.audio_path or not Path(lecture.audio_path).is_file():
                     raise ValueError("No transcript or audio recording available to synthesize.")
 
-                logger.info("Stage 1/3: Transcribing audio (%s) with Whisper...", lecture.audio_path)
+                logger.info("Stage 1/3: Transcribing audio (%s) with Gemini AI...", lecture.audio_path)
                 trans_result = transcribe_audio(lecture.audio_path)
                 transcript_text = trans_result.get("transcript", "").strip()
                 if not transcript_text:

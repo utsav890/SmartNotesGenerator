@@ -40,7 +40,7 @@ services:
         condition: service_started
     environment:
       DATABASE_URL: mysql+pymysql://${MYSQL_USER:-smartnotes_user}:${MYSQL_PASSWORD:?Set MYSQL_PASSWORD in .env}@mysql:3306/${MYSQL_DATABASE:-smart_notes_db}
-      GROQ_API_KEY: ${GROQ_API_KEY:?Set GROQ_API_KEY in .env}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:?Set GEMINI_API_KEY in .env}
       QDRANT_URL: http://qdrant:6333
       QDRANT_API_KEY: ${QDRANT_API_KEY:-}
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}

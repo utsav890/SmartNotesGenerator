@@ -1,93 +1,49 @@
-import os
-import json
+from pydantic import BaseModel
 
-from dotenv import load_dotenv
-from groq import Groq
+from app.gemini_client import generate_gemini_json, get_gemini_client
 
 
-load_dotenv()
+class FlashcardItemSchema(BaseModel):
+    question: str
+    answer: str
 
 
-def get_groq_client():
-    return Groq(
-        api_key=os.getenv("GROQ_API_KEY")
-    )
+class FlashcardResponseSchema(BaseModel):
+    flashcards: list[FlashcardItemSchema]
 
 
-def generate_flashcards(
-    notes_context: str,
-    count: int = 10
-):
-
-    client = get_groq_client()
-
-    prompt = f"""
-Create exactly {count} study flashcards from the lecture
-material below.
+def generate_flashcards(notes_context: str, count: int = 10) -> dict:
+    """Generate spaced-repetition flashcards grounded in lecture material via Gemini."""
+    try:
+        client = get_gemini_client()
+        prompt = f"""Create exactly {count} study flashcards from the lecture material below.
 
 Rules:
 - Use ONLY the provided lecture material.
-- Do not add outside information.
 - Focus on important concepts and facts.
-- Questions should be useful for revision.
-- Answers should be concise and accurate.
-- Return valid JSON only.
-
-Required format:
-
-{{
-    "flashcards": [
-        {{
-            "question": "Question",
-            "answer": "Answer"
-        }}
-    ]
-}}
+- Questions should be useful for revision and answers concise and accurate.
 
 LECTURE MATERIAL:
-{notes_context}
-"""
+{notes_context}"""
 
-    try:
-        response = client.chat.completions.create(
-            model="qwen/qwen3.8-27b",
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a lecture study assistant "
-                        "that creates accurate flashcards."
-                    )
-                },
-                {
-                    "role": "user",
-                    "content": prompt
-                }
-            ],
+        result = generate_gemini_json(
+            client,
+            contents=prompt,
+            system_instruction="You are a lecture study assistant that creates accurate flashcards.",
             temperature=0.2,
-            response_format={
-                "type": "json_object"
-            }
+            response_schema=FlashcardResponseSchema,
         )
-
-        content = response.choices[0].message.content
-        if content:
-            result = json.loads(content)
-            flashcards = result.get("flashcards", [])
-            if flashcards:
-                return {"flashcards": flashcards[:count]}
+        flashcards = result.get("flashcards", [])
+        if flashcards:
+            return {"flashcards": flashcards[:count]}
     except Exception:
         pass
 
     # Fallback flashcards extracted directly from notes context
     items = [line.strip().lstrip("-*•0123456789. ") for line in notes_context.split("\n") if len(line.strip()) > 15]
-    fallback_cards = []
-    for i, item in enumerate(items[:count]):
-        fallback_cards.append({
-            "question": f"Key concept {i+1}: What is the core principle?",
-            "answer": item
-        })
-    if not fallback_cards:
-        fallback_cards = [{"question": "What is the key takeaway?", "answer": notes_context[:100]}]
+    fallback_cards = [
+        {"question": f"Key concept {i + 1}: What is the core principle?", "answer": item}
+        for i, item in enumerate(items[:count])
+    ] or [{"question": "What is the key takeaway?", "answer": notes_context[:100]}]
 
     return {"flashcards": fallback_cards[:count]}

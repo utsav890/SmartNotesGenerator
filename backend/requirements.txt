@@ -13,7 +13,7 @@ fastapi==0.141.1
 filelock==4.0.6
 fsspec==2026.9.0
 greenlet==3.5.6
-groq==1.7.0
+google-genai==3.6.1
 grpcio==1.84.0
 h11==0.16.0
 h2==4.4.1
@@ -37,7 +37,6 @@ narwhals==2.26.0
 networkx==3.5
 numba==0.67.0
 numpy==2.2.6
-openai-whisper==20250625
 packaging==26.3
 playwright==1.63.0
 portalocker==3.2.0

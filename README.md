@@ -18,8 +18,8 @@ Students and lifelong learners spend hours listening to lengthy recorded lecture
 * **Lack of Self-Assessment:** Formulating high-yield revision questions and quizzes takes hours of manual effort.
 
 **NoteFlow solves this end-to-end:**
-1. **Audio Transcription:** Processes MP3, WAV, M4A, OGG, and WebM recordings using OpenAI's Whisper engine.
-2. **Executive Synthesis:** Employs ultra-fast Groq LLMs to generate structured notes with headings, summaries, key takeaways, and revision questions.
+1. **Audio Transcription:** Processes MP3, WAV, M4A, OGG, and WebM recordings natively with Google Gemini multimodal audio understanding (`gemini-2.5-flash`).
+2. **Executive Synthesis:** Employs Google Gemini AI with structured JSON schemas to generate structured notes with headings, summaries, key takeaways, and revision questions.
 3. **Active Recall Quiz:** Automatically synthesizes multiple-choice questions with answer keys and deep conceptual explanations.
 4. **Interactive Flashcards:** Creates flip-card decks for spaced-repetition study.
 5. **Contextual Lecture Q&A:** Allows students to ask follow-up questions directly grounded in lecture content via vector search.
@@ -42,8 +42,8 @@ flowchart TD
 
     subgraph Backend ["Application Layer (FastAPI)"]
         AuthSvc["Auth & Security Engine\n(JWT + Bcrypt)"]
-        TranscribeSvc["Whisper Audio Engine\n(FFmpeg Decoding)"]
-        LLMSvc["Groq LLM Engine\n(Llama-3 Synthesis)"]
+        TranscribeSvc["Gemini Audio Engine\n(Multimodal Transcription)"]
+        LLMSvc["Gemini AI Engine\n(gemini-2.5-flash JSON Synthesis)"]
         VectorSvc["Qdrant Vector Engine\n(Semantic Embeddings)"]
         QuizEngine["Quiz & Flashcard Generator"]
     end
@@ -87,7 +87,7 @@ NoteFlow is architected with defense-in-depth principles:
 ---
 
 ## ⚡ Performance & Efficiency
-* **Sub-Second LLM Generation:** Utilizes Groq LPUs for near-instant notes and quiz generation, eliminating latency bottlenecks.
+* **Fast Structured Gemini Generation:** Utilizes `gemini-2.5-flash` with JSON schema enforcement for reliable audio transcription, notes, and quiz generation.
 * **Asset Optimization:** Built using Vite with chunk splitting, gzip compression, and pre-rendered assets.
 * **CSS Pruning:** Clean tokenized design system removing over 1,700 lines of duplicate and redundant stylesheet declarations.
 * **Database Indexing:** Indexed lookups on `users.email`, `lectures.user_id`, `tokens.token_hash`, and timestamps ensure $O(\log n)$ query performance.
@@ -107,7 +107,7 @@ NoteFlow is architected with defense-in-depth principles:
 The codebase includes a comprehensive 38+ automated unit, integration, and security test suite:
 * **`test_auth_security.py` (11 tests):** User registration, password complexity validation, duplicate email prevention, login, JWT issuance, expired token rejection, signature tampering detection, token refresh, and RBAC admin protection.
 * **`test_lectures_api.py` (10 tests):** Lecture CRUD lifecycle, multi-tenant IDOR attack protection, audio upload MIME & magic byte verification, file size limits (413), and path traversal defenses.
-* **`test_pipeline_and_ai.py` (10 tests):** Transcript cleaning, noise removal, topic segmentation, content coverage checking, mocked Whisper transcription, Groq note generation, RAG Q&A retrieval, and Quiz/Flashcard synthesis.
+* **`test_pipeline_and_ai.py` (10 tests):** Transcript cleaning, noise removal, topic segmentation, content coverage checking, mocked Gemini audio transcription, Gemini note generation, RAG Q&A retrieval, and Quiz/Flashcard synthesis.
 * **`test_security_headers.py` (3 tests):** OWASP security response headers, rate limiting (429 Too Many Requests), and error message sanitization.
 * **`test_core.py` (4 tests):** Core regression suite.
 
@@ -134,7 +134,7 @@ Continuous Integration (`.github/workflows/ci.yml`) automatically executes this 
 4. Choose **Dockerfile** as build type (uses root `Dockerfile`).
 5. Set **Authentication** to **"Allow unauthenticated invocations"**.
 6. Set environment variables:
-   * `GROQ_API_KEY`: `your_groq_api_key`
+   * `GEMINI_API_KEY`: `your_gemini_api_key`
    * `JWT_SECRET`: `your_jwt_secret`
    * `ENVIRONMENT`: `production`
 7. Click **Create** &rarr; Your live HTTPS Cloud Run URL will be generated!
@@ -159,5 +159,5 @@ Access the application at `http://localhost`.
 ## 👨‍💻 Tech Stack
 * **Frontend:** React 19, Vite, Lucide React, Framer Motion, CSS Design System
 * **Backend:** FastAPI, Python 3.11+, SQLAlchemy, PyMySQL, Pydantic, Uvicorn
-* **AI & NLP:** OpenAI Whisper, Groq API (Llama-3), Qdrant Vector Search
+* **AI & NLP:** Google Gemini API (`gemini-2.5-flash`), Sentence Transformers, Qdrant Vector Search
 * **Infrastructure:** Docker, Nginx, Google Cloud Run, GitHub Actions CI/CD

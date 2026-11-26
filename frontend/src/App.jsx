@@ -5,6 +5,7 @@ import {
   Copy,
   Check,
   Download,
+  FileDown,
   Brain,
   Volume2
 } from "lucide-react";
@@ -46,7 +47,8 @@ import {
   getActiveStep,
   getSubject,
   isLectureProcessing,
-  isLectureReady
+  isLectureReady,
+  validateMediaFile
 } from "./utils/lectureUtils";
 
 function App() {
@@ -389,7 +391,12 @@ function App() {
   // Audio pipeline
   const handleAudioGenerate = async () => {
     if (!file) {
-      setError("Please select an audio file first.");
+      setError("Please select an audio or MP4 file first.");
+      return;
+    }
+    const fileError = validateMediaFile(file);
+    if (fileError) {
+      setError(fileError);
       return;
     }
 
@@ -431,12 +438,12 @@ function App() {
       });
       fetchLecturesAndStats();
 
-      setStatus("Transcribing audio with OpenAI Whisper...");
+      setStatus("Transcribing audio with Gemini AI...");
       await apiRequest(`/transcribe/${encodeURIComponent(filename)}`, {
         method: "POST",
       });
 
-      setStatus("Generating structured study notes with Groq LLM...");
+      setStatus("Generating structured study notes with Gemini AI...");
       await apiRequest(`/lectures/${id}/generate-notes`, {
         method: "POST",
       });
@@ -931,6 +938,13 @@ function App() {
 
     const droppedFile = e.dataTransfer.files?.[0];
     if (droppedFile) {
+      const fileError = validateMediaFile(droppedFile);
+      if (fileError) {
+        setFile(null);
+        setError(fileError);
+        setInputTab("audio");
+        return;
+      }
       setFile(droppedFile);
       setTranscript("");
       setError("");
@@ -1062,10 +1076,10 @@ function App() {
                   </p>
                   <div className="stitch-hero-badges stitch-hero-chips">
                     <span className="stitch-chip stitch-hero-badge">
-                      <Volume2 size={13} /> Whisper Audio Transcription
+                      <Volume2 size={13} /> Gemini Audio Transcription
                     </span>
                     <span className="stitch-chip stitch-hero-badge">
-                      <Sparkles size={13} /> Groq Ultra-Fast LLM
+                      <Sparkles size={13} /> Gemini AI Synthesis
                     </span>
                     <span className="stitch-chip stitch-hero-badge">
                       <Brain size={13} /> Qdrant RAG Memory
@@ -1123,7 +1137,16 @@ function App() {
                       <h2>Interactive Study Sheet</h2>
                       <p>Full structured synthesis, glossary terms, and active recall checks.</p>
                     </div>
-                    <div className="preview-actions">
+                    <div className="preview-actions no-print">
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        onClick={() => window.print()}
+                        title="Print or Save as PDF"
+                      >
+                        <FileDown size={16} />
+                        <span>Download PDF</span>
+                      </button>
                       <button
                         type="button"
                         className="secondary-btn"
@@ -1131,16 +1154,16 @@ function App() {
                         title="Copy as Markdown"
                       >
                         {copied ? <Check size={16} color="var(--success)" /> : <Copy size={16} />}
-                        <span>{copied ? "Copied" : "Copy Notes"}</span>
+                        <span>{copied ? "Copied" : "Copy"}</span>
                       </button>
                       <button
                         type="button"
                         className="secondary-btn"
                         onClick={downloadNotes}
-                        title="Download notes"
+                        title="Download text file"
                       >
                         <Download size={16} />
-                        <span>Download</span>
+                        <span>.TXT</span>
                       </button>
                       <button
                         type="button"
@@ -1155,7 +1178,22 @@ function App() {
                   </div>
 
                   <div className="stitch-notes-article-wrapper">
-                    <NotesArticle notes={notes} />
+                    <NotesArticle
+                      notes={notes}
+                      sourceLabel={
+                        selectedLecture?.audio_filename
+                          ? selectedLecture.audio_filename.toLowerCase().endsWith(".mp4")
+                            ? "MP4 Lecture"
+                            : "Audio Lecture"
+                          : file
+                            ? file.name.toLowerCase().endsWith(".mp4")
+                              ? "MP4 Lecture"
+                              : "Audio Lecture"
+                            : "Lecture Transcript"
+                      }
+                      durationSeconds={selectedLecture?.duration_seconds}
+                      createdAt={selectedLecture?.created_at}
+                    />
                   </div>
                 </section>
               )}

@@ -61,7 +61,7 @@ export default function RecentLecturesTable({
           </div>
 
           <div className="stitch-subject-dropdown-wrapper">
-            <Filter size={14} />
+            <Filter size={14} aria-hidden="true" />
             <select
               value={subjectFilter}
               onChange={(e) => setSubjectFilter(e.target.value)}
@@ -69,8 +69,13 @@ export default function RecentLecturesTable({
               aria-label="Filter by subject"
             >
               <option value="all">All Subjects</option>
-              {Array.from(new Set(lectures.map((lec) => getSubject(lec))))
-                .filter(Boolean)
+              {Array.from(
+                new Set(
+                  (Array.isArray(lectures) ? lectures : [])
+                    .map((lec) => getSubject(lec))
+                    .filter((subj) => typeof subj === "string" && subj.trim() && subj !== "All Subjects")
+                )
+              )
                 .sort((a, b) => a.localeCompare(b))
                 .map((subj) => (
                   <option key={subj} value={subj}>

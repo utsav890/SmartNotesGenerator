@@ -105,7 +105,7 @@ export default function QuizView({
           />
           <h2>Synthesizing Active Recall Quiz</h2>
           <p>
-            Groq AI is designing challenging comprehension and concept questions
+            Gemini AI is designing challenging comprehension and concept questions
             from your lecture…
           </p>
         </div>

@@ -10,12 +10,14 @@ Covers:
 import io
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 from fastapi.testclient import TestClient
 
 from tests.setup_test_db import test_engine, TestingSessionLocal
 from app.database import Base
 from app.models import User, Lecture
 from app.auth import hash_password
+import app.main as app_main
 from app.main import app
 
 
@@ -172,3 +174,18 @@ class TestLecturesAPI(unittest.TestCase):
         self.assertIn("lecture_id", data)
         self.assertIn("saved_filename", data)
         self.assertEqual(data["status"], "uploaded")
+
+    def test_11_audio_upload_over_300mb_rejected(self):
+        """Verify max media upload limit is 300 MB and oversized MP4 uploads return HTTP 413."""
+        self.assertEqual(app_main.MAX_FILE_SIZE, 300 * 1024 * 1024)
+        oversized_mp4 = io.BytesIO(
+            b"\x00\x00\x00\x20ftypisom\x00\x00\x02\x00isomiso2mp41" + b"\x00" * 2048
+        )
+        with patch.object(app_main, "MAX_FILE_SIZE", 1024):
+            res = self.client.post(
+                "/upload-audio",
+                files={"file": ("too_big.mp4", oversized_mp4, "video/mp4")},
+                headers={"Authorization": f"Bearer {self.token_a}"}
+            )
+        self.assertEqual(res.status_code, 413)
+        self.assertIn("300 MB", res.json()["detail"])

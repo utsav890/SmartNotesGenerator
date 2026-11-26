@@ -20,7 +20,7 @@ sudo apt-get update && sudo apt-get install -y \
     git \
     ufw
 
-# 2. Add 4GB Swap Space (Essential for PyTorch & Whisper on budget VMs)
+# 2. Add 4GB Swap Space (Essential for PyTorch / embedding models on budget VMs)
 if [ ! -f /swapfile ]; then
     echo "💾 Creating 4GB Swap space to protect against Out-Of-Memory (OOM)..."
     sudo fallocate -l 4G /swapfile || sudo dd if=/dev/zero of=/swapfile bs=1M count=4096
@@ -56,13 +56,13 @@ if [ ! -f .env ]; then
         cp .env.example .env
     else
         cat <<EOF > .env
-GROQ_API_KEY=
+GEMINI_API_KEY=
 JWT_SECRET=$(openssl rand -hex 24)
 ENVIRONMENT=production
 COOKIE_SECURE=false
 EOF
     fi
-    echo "⚠️  Created .env file. Please edit .env with your GROQ_API_KEY if needed:"
+    echo "⚠️  Created .env file. Please edit .env with your GEMINI_API_KEY if needed:"
     echo "    nano .env"
 fi
 

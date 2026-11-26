@@ -1,225 +1,264 @@
 import { useState } from "react";
 import {
   Clock,
+  Calendar,
+  FileText,
   CheckCircle2,
-  Sparkles,
+  Zap,
   Copy,
   Check,
   BookOpen,
-  Brain
+  Brain,
+  ChevronDown,
+  ChevronUp
 } from "lucide-react";
+import { formatDate, formatDuration } from "../../utils/lectureUtils";
 import { calculateReadingTime } from "../../utils/notesFormatter";
+
+function formatSectionCopyText(index, section) {
+  const heading = `### ${index + 1}. ${section.heading || `Section ${index + 1}`}`;
+  const lines = [];
+  if (section.intro) lines.push(section.intro);
+  if (Array.isArray(section.bullets) && section.bullets.length > 0) {
+    section.bullets.forEach((b) => {
+      lines.push(b.label ? `- **${b.label}:** ${b.detail}` : `- ${b.detail}`);
+    });
+  } else if (section.content) {
+    lines.push(section.content);
+  }
+  return `${heading}\n\n${lines.join("\n")}`;
+}
 
 export default function NotesArticle({
   notes,
-  headingLevel = 3,
+  headingLevel = 2,
   showTitle = true,
+  sourceLabel = "",
+  durationSeconds = null,
+  createdAt = null,
 }) {
   const TitleHeading = `h${headingLevel}`;
   const SectionHeading = `h${headingLevel + 1}`;
   const readingTime = calculateReadingTime(notes);
   const [revealedAnswers, setRevealedAnswers] = useState({});
   const [copiedSection, setCopiedSection] = useState(null);
+  const [activeDrawer, setActiveDrawer] = useState(null);
 
   const toggleAnswer = (idx) => {
     setRevealedAnswers((prev) => ({ ...prev, [idx]: !prev[idx] }));
   };
 
-  const copySectionText = (idx, heading, content) => {
-    const text = `### ${heading}\n\n${content}`;
-    navigator.clipboard?.writeText(text);
+  const toggleDrawer = (drawerName) => {
+    setActiveDrawer((prev) => (prev === drawerName ? null : drawerName));
+  };
+
+  const copySectionText = (idx, section) => {
+    navigator.clipboard?.writeText(formatSectionCopyText(idx, section));
     setCopiedSection(idx);
     setTimeout(() => setCopiedSection(null), 2000);
   };
 
   if (!notes) return null;
 
+  const displayDuration =
+    durationSeconds !== null && durationSeconds !== undefined && !isNaN(Number(durationSeconds))
+      ? `Duration: ${formatDuration(durationSeconds)}`
+      : readingTime;
+  const displayDate = formatDate(createdAt || new Date().toISOString());
+  const glossaryCount = notes.glossary?.length || 0;
+  const questionsCount = notes.revision_questions?.length || 0;
+
   return (
-    <div className="notes-article stitch-study-sheet">
+    <article className="notes-article notes-paper-sheet">
       {showTitle && (
-        <div className="stitch-sheet-header">
-          <div className="stitch-sheet-top-row">
-            <TitleHeading className="stitch-sheet-title">{notes.title}</TitleHeading>
-            <div className="stitch-sheet-meta">
-              <span className="stitch-sheet-pill">
-                <Clock size={14} aria-hidden="true" />
-                {readingTime}
-              </span>
-              <span
-                className="stitch-sheet-pill"
-                style={{ background: "#dcfce7", color: "#15803d" }}
-              >
-                <CheckCircle2 size={14} aria-hidden="true" />
-                100% Grounded
-              </span>
-              {notes.sections?.length > 0 && (
-                <span className="stitch-sheet-pill">
-                  {notes.sections.length} Topics
+        <header className="notes-doc-header">
+          <TitleHeading
+            className="notes-doc-title"
+            id={headingLevel === 1 ? "reader-title" : undefined}
+            tabIndex={headingLevel === 1 ? -1 : undefined}
+          >
+            {notes.title}
+          </TitleHeading>
+          <div className="notes-doc-meta">
+            <span className="notes-doc-meta-item">
+              <FileText size={14} aria-hidden="true" />
+              {sourceLabel || "Study Notes"}
+            </span>
+            <span className="notes-doc-meta-sep" aria-hidden="true" />
+            <span className="notes-doc-meta-item">
+              <Clock size={14} aria-hidden="true" />
+              {displayDuration}
+            </span>
+            {displayDate !== "—" && (
+              <>
+                <span className="notes-doc-meta-sep" aria-hidden="true" />
+                <span className="notes-doc-meta-item">
+                  <Calendar size={14} aria-hidden="true" />
+                  Generated: {displayDate}
                 </span>
-              )}
-            </div>
+              </>
+            )}
+            <span className="notes-doc-grounded-pill">
+              <CheckCircle2 size={13} aria-hidden="true" />
+              Grounded
+            </span>
           </div>
-        </div>
+          <hr className="notes-doc-divider" />
+        </header>
       )}
 
-      {notes.summary && (
-        <div className="stitch-summary-card">
-          <div className="stitch-card-heading">
-            <Sparkles size={16} color="var(--stitch-primary)" aria-hidden="true" />
-            Executive Summary
-          </div>
-          <p className="stitch-summary-text">{notes.summary}</p>
-        </div>
-      )}
-
-      {notes.key_points && notes.key_points.length > 0 && (
-        <section
-          className="stitch-section-card"
-          aria-labelledby="key-points-title"
-        >
-          <div className="stitch-card-heading" id="key-points-title">
-            <CheckCircle2 size={16} color="#10b981" aria-hidden="true" />
-            Key Takeaways &amp; Core Concepts
-          </div>
-          <ul className="stitch-takeaways-list">
-            {notes.key_points.map((point, index) => (
-              <li key={`key-${index}`} className="stitch-takeaway-item">
-                <span className="stitch-takeaway-check">✓</span>
-                <span>{point}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {notes.summary && <p className="notes-doc-summary">{notes.summary}</p>}
 
       {notes.sections && notes.sections.length > 0 && (
-        <div className="notes-sections-wrapper">
+        <div className="notes-doc-sections">
           {notes.sections.map((section, index) => (
-            <article
-              className="stitch-section-card"
+            <section
+              className="notes-doc-section"
               key={`${section.heading || "section"}-${index}`}
             >
-              <div className="stitch-section-header">
-                <div
-                  style={{ display: "flex", alignItems: "center", gap: "10px" }}
-                >
-                  <span className="section-number">
-                    {String(index + 1).padStart(2, "0")}
-                  </span>
-                  <SectionHeading className="stitch-section-heading">
-                    {section.heading || `Section ${index + 1}`}
-                  </SectionHeading>
-                </div>
+              <div className="notes-doc-section-header">
+                <SectionHeading className="notes-doc-section-heading">
+                  {index + 1}. {section.heading || `Section ${index + 1}`}
+                </SectionHeading>
                 <button
                   type="button"
-                  className="stitch-icon-btn"
-                  onClick={() =>
-                    copySectionText(index, section.heading, section.content)
-                  }
-                  title="Copy Section"
+                  className="stitch-icon-btn notes-section-copy no-print"
+                  onClick={() => copySectionText(index, section)}
+                  title="Copy section"
                   aria-label="Copy section text"
                 >
                   {copiedSection === index ? (
-                    <Check size={16} color="#10b981" />
+                    <Check size={15} color="#10b981" />
                   ) : (
-                    <Copy size={16} />
+                    <Copy size={15} />
                   )}
                 </button>
               </div>
-              <p className="stitch-section-body">{section.content}</p>
-            </article>
+
+              {section.intro && <p className="notes-doc-intro">{section.intro}</p>}
+
+              {Array.isArray(section.bullets) && section.bullets.length > 0 ? (
+                <ul className="notes-bullet-list">
+                  {section.bullets.map((bullet, bIdx) => (
+                    <li key={`b-${index}-${bIdx}`} className="notes-bullet-item">
+                      {bullet.label ? (
+                        <>
+                          <strong>{bullet.label}:</strong> {bullet.detail}
+                        </>
+                      ) : (
+                        bullet.detail
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              ) : (
+                section.content && <p className="stitch-section-body">{section.content}</p>
+              )}
+            </section>
           ))}
         </div>
       )}
 
-      {notes.glossary && notes.glossary.length > 0 && (
-        <section
-          className="stitch-section-card"
-          aria-labelledby="glossary-title"
-        >
-          <div className="stitch-card-heading" id="glossary-title">
-            <BookOpen size={16} color="var(--stitch-primary)" aria-hidden="true" />
-            Technical Glossary &amp; Definitions
+      {notes.key_points && notes.key_points.length > 0 && (
+        <aside className="notes-recap-callout" aria-labelledby="key-points-title">
+          <div className="notes-recap-heading" id="key-points-title">
+            <Zap size={16} aria-hidden="true" />
+            <span>Key Points (Quick Recap)</span>
           </div>
-          <div className="stitch-glossary-grid">
-            {notes.glossary.map((item, index) => (
-              <div key={`glossary-${index}`} className="stitch-glossary-item">
-                <div className="stitch-term-name">{item.term}</div>
-                <div className="stitch-term-def">{item.definition}</div>
-              </div>
+          <ul className="notes-recap-list">
+            {notes.key_points.map((point, index) => (
+              <li key={`key-${index}`}>{point}</li>
             ))}
-          </div>
-        </section>
+          </ul>
+        </aside>
       )}
 
-      {notes.revision_questions && notes.revision_questions.length > 0 && (
-        <section
-          className="stitch-section-card"
-          aria-labelledby="revision-questions-title"
-        >
-          <div className="stitch-card-heading" id="revision-questions-title">
-            <Brain size={16} color="var(--stitch-primary)" aria-hidden="true" />
-            Check Your Understanding &amp; Model Answers
-          </div>
-          <div className="stitch-qa-list">
-            {notes.revision_questions.map((item, index) => {
-              const qText = typeof item === "object" ? item.question : item;
-              const aText = typeof item === "object" ? item.answer : null;
-              const isRevealed = revealedAnswers[index];
+      {(glossaryCount > 0 || questionsCount > 0) && (
+        <div className="notes-drawers no-print">
+          <div className="notes-drawer-toggles">
+            {glossaryCount > 0 && (
+              <button
+                type="button"
+                className={`notes-drawer-btn ${activeDrawer === "glossary" ? "active" : ""}`}
+                onClick={() => toggleDrawer("glossary")}
+                aria-expanded={activeDrawer === "glossary"}
+              >
+                <span className="notes-drawer-btn-label">
+                  <BookOpen size={15} aria-hidden="true" />
+                  Glossary ({glossaryCount} {glossaryCount === 1 ? "term" : "terms"})
+                </span>
+                {activeDrawer === "glossary" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+            )}
 
-              return (
-                <div key={`question-${index}`} className="stitch-qa-item">
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "flex-start",
-                      justifyContent: "space-between",
-                      gap: "12px",
-                    }}
-                  >
-                    <div className="stitch-question-text">
-                      <span
-                        style={{
-                          color: "var(--stitch-primary)",
-                          marginRight: "6px",
-                        }}
-                      >
-                        Q{index + 1}.
-                      </span>
-                      {qText}
-                    </div>
-                    {aText && (
-                      <button
-                        type="button"
-                        className="stitch-view-btn"
-                        onClick={() => toggleAnswer(index)}
-                        style={{ whiteSpace: "nowrap", flexShrink: 0 }}
-                      >
-                        {isRevealed ? "Hide Answer" : "Show Model Answer"}
-                      </button>
-                    )}
+            {questionsCount > 0 && (
+              <button
+                type="button"
+                className={`notes-drawer-btn ${activeDrawer === "questions" ? "active" : ""}`}
+                onClick={() => toggleDrawer("questions")}
+                aria-expanded={activeDrawer === "questions"}
+              >
+                <span className="notes-drawer-btn-label">
+                  <Brain size={15} aria-hidden="true" />
+                  Practice Questions ({questionsCount})
+                </span>
+                {activeDrawer === "questions" ? <ChevronUp size={15} /> : <ChevronDown size={15} />}
+              </button>
+            )}
+          </div>
+
+          {activeDrawer === "glossary" && glossaryCount > 0 && (
+            <section className="notes-drawer-panel" aria-label="Technical Glossary">
+              <div className="stitch-glossary-grid">
+                {notes.glossary.map((item, index) => (
+                  <div key={`glossary-${index}`} className="stitch-glossary-item">
+                    <div className="stitch-term-name">{item.term}</div>
+                    <div className="stitch-term-def">{item.definition}</div>
                   </div>
-                  {isRevealed && aText && (
-                    <div className="stitch-model-answer">
-                      <strong
-                        style={{
-                          display: "block",
-                          marginBottom: "4px",
-                          color: "var(--stitch-primary)",
-                          fontSize: "0.82rem",
-                        }}
-                      >
-                        Model Answer &amp; Explanation:
-                      </strong>
-                      {aText}
+                ))}
+              </div>
+            </section>
+          )}
+
+          {activeDrawer === "questions" && questionsCount > 0 && (
+            <section className="notes-drawer-panel" aria-label="Practice Questions">
+              <div className="stitch-qa-list">
+                {notes.revision_questions.map((item, index) => {
+                  const qText = typeof item === "object" ? item.question : item;
+                  const aText = typeof item === "object" ? item.answer : null;
+                  const isRevealed = revealedAnswers[index];
+
+                  return (
+                    <div key={`question-${index}`} className="stitch-qa-item">
+                      <div className="notes-qa-row">
+                        <div className="stitch-question-text">
+                          <span className="notes-qa-num">Q{index + 1}.</span>
+                          {qText}
+                        </div>
+                        {aText && (
+                          <button
+                            type="button"
+                            className="stitch-view-btn"
+                            onClick={() => toggleAnswer(index)}
+                          >
+                            {isRevealed ? "Hide Answer" : "Show Answer"}
+                          </button>
+                        )}
+                      </div>
+                      {isRevealed && aText && (
+                        <div className="stitch-model-answer">
+                          <strong className="notes-qa-answer-label">Model Answer:</strong>
+                          {aText}
+                        </div>
+                      )}
                     </div>
-                  )}
-                </div>
-              );
-            })}
-          </div>
-        </section>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </div>
       )}
-    </div>
+    </article>
   );
 }

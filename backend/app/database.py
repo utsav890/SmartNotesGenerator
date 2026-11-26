@@ -85,23 +85,3 @@ def get_db():
         yield db
     finally:
         db.close()
-
-# Create database sessions
-SessionLocal = sessionmaker(
-    autocommit=False,
-    autoflush=False,
-    bind=engine
-)
-
-# Base class for SQLAlchemy models
-Base = declarative_base()
-
-
-# Dependency for FastAPI routes
-def get_db():
-    db = SessionLocal()
-
-    try:
-        yield db
-    finally:
-        db.close()

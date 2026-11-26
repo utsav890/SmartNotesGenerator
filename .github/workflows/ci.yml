@@ -38,7 +38,7 @@ jobs:
           DATABASE_URL: "sqlite:///:memory:"
           ENVIRONMENT: "testing"
           JWT_SECRET: "CiSecretKeyForAutomatedEvaluation2026!"
-          GROQ_API_KEY: "gsk_ci_mock_test_key_for_automated_testing_12345"
+          GEMINI_API_KEY: "gemini_ci_mock_test_key_for_automated_testing_12345"
         run: |
           cd backend
           python -m unittest discover tests

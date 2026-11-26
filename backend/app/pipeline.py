@@ -1,6 +1,7 @@
+import os
 from .cleaner import clean_transcript
 from .segmentor import segment_transcript
-from .coverage_checker import check_coverage
+from .coverage_checker import check_coverage, verify_coverage_with_gemini
 from .notes_generator import generate_notes
 from .qdrant_service import store_chunks
 
@@ -129,9 +130,12 @@ def process_transcript(
     # 7. COVERAGE CHECK
     # --------------------------------------------------
 
-    coverage = check_coverage(
-        segments,
-        generated_notes
+    api_key = os.getenv("GEMINI_API_KEY", "").strip()
+    use_semantic = bool(api_key and os.getenv("ENVIRONMENT", "").lower() != "testing" and "mock" not in api_key.lower())
+    coverage = (
+        verify_coverage_with_gemini(segments, generated_notes)
+        if use_semantic
+        else check_coverage(segments, generated_notes)
     )
 
     # --------------------------------------------------

@@ -6,6 +6,7 @@ import {
   LoaderCircle,
   Sparkles
 } from "lucide-react";
+import { validateMediaFile } from "../../utils/lectureUtils";
 
 export default function WorkspaceStudio({
   inputTab,
@@ -44,7 +45,7 @@ export default function WorkspaceStudio({
             disabled={loading}
           >
             <FileAudio size={16} />
-            Upload Audio
+            Upload Audio / MP4
           </button>
           <button
             type="button"
@@ -80,11 +81,21 @@ export default function WorkspaceStudio({
               aria-label="Choose lecture audio or video file"
               style={{ display: "none" }}
               onChange={(e) => {
-                setFile(e.target.files?.[0] || null);
+                const picked = e.target.files?.[0] || null;
                 setTranscript("");
-                setError("");
                 setNotes("");
                 setStatus("");
+                if (picked) {
+                  const validationError = validateMediaFile(picked);
+                  if (validationError) {
+                    setFile(null);
+                    setError(validationError);
+                    e.target.value = "";
+                    return;
+                  }
+                }
+                setFile(picked);
+                setError("");
               }}
             />
 
@@ -100,7 +111,7 @@ export default function WorkspaceStudio({
                   <div className="file-info">
                     <strong className="file-name">{file.name}</strong>
                     <span className="file-subtext">
-                      {(file.size / (1024 * 1024)).toFixed(2)} MB · Ready for Whisper transcription
+                      {(file.size / (1024 * 1024)).toFixed(2)} MB · Ready for Gemini audio transcription
                     </span>
                   </div>
                 </div>
@@ -122,7 +133,7 @@ export default function WorkspaceStudio({
                   <Upload size={28} />
                 </div>
                 <h4>Drag &amp; drop your lecture recording here</h4>
-                <p>Supports MP3, WAV, M4A, OGG, WEBM up to 50 MB</p>
+                <p>Supports MP3, WAV, M4A, MP4, OGG, WEBM up to 300 MB</p>
                 <span className="stitch-browse-btn">Browse files</span>
               </div>
             )}

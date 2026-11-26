@@ -6,8 +6,8 @@ import {
   Copy,
   Check,
   Download,
+  FileDown,
   Trash2,
-  Clock,
   RotateCcw,
   BookOpen
 } from "lucide-react";
@@ -86,52 +86,37 @@ export default function NoteReaderView({
   }
 
   const isReady = Boolean(notes) && !isProcessing && !isFailed;
+  const sourceLabel = selectedLecture?.audio_filename
+    ? selectedLecture.audio_filename.toLowerCase().endsWith(".mp4")
+      ? "MP4 Lecture"
+      : "Audio Lecture"
+    : "Lecture Transcript";
+
+  const handlePrintPdf = () => {
+    window.print();
+  };
 
   return (
     <section className="reader-card" aria-labelledby="reader-title">
-      <button type="button" className="back-btn" onClick={openMyNotes}>
-        <ArrowLeft size={16} aria-hidden="true" /> Back to My Notes
-      </button>
-
-      <div className="reader-heading reader-heading-actions">
-        <div>
-          <span className="preview-kicker">Saved Study Sheet</span>
-          <h1 id="reader-title" tabIndex={-1}>
-            {readerTitle}
-          </h1>
-          {selectedLecture?.created_at && (
-            <p className="reader-saved-date">
-              <Clock size={13} /> Saved on{" "}
-              {new Date(selectedLecture.created_at).toLocaleDateString()}
-            </p>
-          )}
+      <div className="reader-topbar-row no-print">
+        <div className="reader-breadcrumb">
+          <button type="button" className="back-btn" onClick={openMyNotes}>
+            <ArrowLeft size={16} aria-hidden="true" /> My Notes
+          </button>
+          <span className="reader-breadcrumb-sep" aria-hidden="true">/</span>
+          <span className="reader-breadcrumb-current">{readerTitle}</span>
         </div>
 
         <div className="reader-actions">
           <button
             type="button"
-            className="reader-quiz-btn"
-            onClick={generateAndOpenQuiz}
-            disabled={!isReady || quizLoading || notesLoading}
-            aria-busy={quizLoading}
+            className="secondary-btn reader-pdf-btn"
+            onClick={handlePrintPdf}
+            disabled={!isReady || notesLoading}
+            title="Print or Save as PDF"
           >
-            {quizLoading ? (
-              <LoaderCircle className="spin" size={17} aria-hidden="true" />
-            ) : (
-              <Brain size={17} aria-hidden="true" />
-            )}
-            {quizLoading ? "Generating Quiz…" : "Take Quiz"}
-          </button>
-
-          <button
-            type="button"
-            className="reader-ask-btn"
-            onClick={jumpToQuestion}
-            disabled={!isReady || questionSubmitting || notesLoading}
-            aria-controls="lecture-question"
-          >
-            <MessageCircleQuestion size={17} aria-hidden="true" />
-            Ask AI Copilot
+            <FileDown size={16} aria-hidden="true" />
+            Download PDF
           </button>
 
           <button
@@ -142,7 +127,7 @@ export default function NoteReaderView({
             aria-label="Copy notes to clipboard"
             disabled={!isReady}
           >
-            {copied ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
+            {copied ? <Check size={17} color="var(--success)" /> : <Copy size={17} />}
           </button>
 
           <button
@@ -153,7 +138,33 @@ export default function NoteReaderView({
             aria-label="Download notes"
             disabled={!isReady}
           >
-            <Download size={18} />
+            <Download size={17} />
+          </button>
+
+          <button
+            type="button"
+            className="reader-quiz-btn"
+            onClick={generateAndOpenQuiz}
+            disabled={!isReady || quizLoading || notesLoading}
+            aria-busy={quizLoading}
+          >
+            {quizLoading ? (
+              <LoaderCircle className="spin" size={16} aria-hidden="true" />
+            ) : (
+              <Brain size={16} aria-hidden="true" />
+            )}
+            {quizLoading ? "Generating…" : "Take Quiz"}
+          </button>
+
+          <button
+            type="button"
+            className="reader-ask-btn"
+            onClick={jumpToQuestion}
+            disabled={!isReady || questionSubmitting || notesLoading}
+            aria-controls="lecture-question"
+          >
+            <MessageCircleQuestion size={16} aria-hidden="true" />
+            Ask Copilot
           </button>
 
           <button
@@ -166,7 +177,7 @@ export default function NoteReaderView({
             }}
             disabled={!isReady || deletingNotes || notesLoading}
           >
-            <Trash2 size={16} aria-hidden="true" />
+            <Trash2 size={15} aria-hidden="true" />
             Delete Notes
           </button>
         </div>
@@ -177,7 +188,7 @@ export default function NoteReaderView({
           <LoaderCircle className="spin" size={36} color="var(--accent)" aria-hidden="true" />
           <h2>Synthesizing Study Sheet with AI...</h2>
           <p>
-            Whisper transcription and Groq analysis are currently active. This page
+            Gemini audio transcription and study-sheet analysis are currently active. This page
             will automatically refresh when the notes are ready.
           </p>
           {handleRetryLecture && selectedLecture?.id && (
@@ -223,26 +234,35 @@ export default function NoteReaderView({
       {isReady && (
         <>
           <div className="notes-output reader-output">
-            <NotesArticle notes={notes} headingLevel={2} showTitle={false} />
+            <NotesArticle
+              notes={notes}
+              headingLevel={1}
+              showTitle={true}
+              sourceLabel={sourceLabel}
+              durationSeconds={selectedLecture?.duration_seconds}
+              createdAt={selectedLecture?.created_at}
+            />
           </div>
 
-          <LectureQA
-            conversation={conversation}
-            historyLoading={historyLoading}
-            historyError={historyError}
-            reloadConversation={reloadConversation}
-            question={question}
-            setQuestion={setQuestion}
-            questionSubmitting={questionSubmitting}
-            questionError={questionError}
-            setQuestionError={setQuestionError}
-            submitQuestion={submitQuestion}
-            questionInputRef={questionInputRef}
-            onSuggestionSelect={jumpToQuestion}
-            placeholder="Type your question about this lecture..."
-            emptyText="No questions asked yet. Ask about definitions, formulas, derivations, or confusing concepts!"
-            hintText="Answers grounded in lecture notes"
-          />
+          <div className="no-print">
+            <LectureQA
+              conversation={conversation}
+              historyLoading={historyLoading}
+              historyError={historyError}
+              reloadConversation={reloadConversation}
+              question={question}
+              setQuestion={setQuestion}
+              questionSubmitting={questionSubmitting}
+              questionError={questionError}
+              setQuestionError={setQuestionError}
+              submitQuestion={submitQuestion}
+              questionInputRef={questionInputRef}
+              onSuggestionSelect={jumpToQuestion}
+              placeholder="Type your question about this lecture..."
+              emptyText="No questions asked yet. Ask about definitions, formulas, derivations, or confusing concepts!"
+              hintText="Answers grounded in lecture notes"
+            />
+          </div>
         </>
       )}
 
