@@ -1,49 +1,28 @@
-"""Lecture audio/video transcription powered by Google Gemini native audio understanding."""
+"""Lecture audio/video transcription powered by OpenAI Whisper with ffmpeg MP4 audio extraction."""
 
 import logging
-import mimetypes
+import os
 import shutil
 import subprocess
 import time
 import traceback
+from functools import lru_cache
 from pathlib import Path
-
-from pydantic import BaseModel
-
-from app.gemini_client import extract_gemini_error_message, generate_gemini_json, get_gemini_client
 
 logger = logging.getLogger(__name__)
 
-INLINE_AUDIO_LIMIT_BYTES = 15 * 1024 * 1024
 
-MIME_TYPE_MAP = {
-    ".mp3": "audio/mpeg",
-    ".wav": "audio/wav",
-    ".m4a": "audio/mp4",
-    ".mp4": "video/mp4",
-    ".ogg": "audio/ogg",
-    ".opus": "audio/ogg",
-    ".webm": "audio/webm",
-    ".flac": "audio/flac",
-    ".aac": "audio/aac",
-}
+@lru_cache(maxsize=1)
+def load_model():
+    """Lazy-load the OpenAI Whisper model once and cache it across requests."""
+    import whisper
 
-
-class TranscriptionResponseSchema(BaseModel):
-    transcript: str
-    language: str
-
-
-def _resolve_mime_type(path: Path) -> str:
-    ext = path.suffix.lower()
-    if ext in MIME_TYPE_MAP:
-        return MIME_TYPE_MAP[ext]
-    guessed, _ = mimetypes.guess_type(str(path))
-    return guessed or "audio/mpeg"
+    model_name = os.getenv("WHISPER_MODEL", "base").strip() or "base"
+    return whisper.load_model(model_name)
 
 
 def _convert_video_to_audio_if_needed(path: Path) -> Path:
-    """Extract an audio track from video containers via ffmpeg when available to shrink payload size."""
+    """Extract a 16kHz mono WAV track from video containers (.mp4, etc.) via ffmpeg when available."""
     if path.suffix.lower() in (".mp4", ".mov", ".avi", ".mkv"):
         ffmpeg_bin = shutil.which("ffmpeg")
         if ffmpeg_bin:
@@ -53,8 +32,17 @@ def _convert_video_to_audio_if_needed(path: Path) -> Path:
                 try:
                     subprocess.run(
                         [
-                            ffmpeg_bin, "-y", "-i", str(path), "-vn",
-                            "-acodec", "pcm_s16le", "-ar", "16000", "-ac", "1",
+                            ffmpeg_bin,
+                            "-y",
+                            "-i",
+                            str(path),
+                            "-vn",
+                            "-acodec",
+                            "pcm_s16le",
+                            "-ar",
+                            "16000",
+                            "-ac",
+                            "1",
                             str(converted_path),
                         ],
                         check=True,
@@ -62,12 +50,15 @@ def _convert_video_to_audio_if_needed(path: Path) -> Path:
                     )
                     return converted_path
                 except Exception as ffmpeg_err:
-                    logger.warning("ffmpeg audio extraction failed (%s); sending container directly to Gemini.", ffmpeg_err)
+                    logger.warning(
+                        "ffmpeg audio pre-extraction failed (%s); falling back to direct Whisper decoding.",
+                        ffmpeg_err,
+                    )
     return path
 
 
 def transcribe_audio(file_path: str) -> dict:
-    """Transcribe an audio or video file using Google Gemini multimodal audio input."""
+    """Transcribe an audio or MP4 file using Whisper (with ffmpeg video track extraction)."""
     path = Path(file_path)
     if not path.is_file():
         raise FileNotFoundError(f"Audio file not found: {file_path}")
@@ -80,70 +71,37 @@ def transcribe_audio(file_path: str) -> dict:
 
     started_at = time.perf_counter()
     target_path = _convert_video_to_audio_if_needed(path)
-    client = None
-    uploaded_file = None
+    model = load_model()
+    model_loaded_at = time.perf_counter()
 
     try:
-        from google.genai import types
-
-        client = get_gemini_client()
-        mime_type = _resolve_mime_type(target_path)
-        try:
-            file_size = target_path.stat().st_size
-        except OSError:
-            file_size = 0
-
-        prompt = (
-            "Transcribe all spoken words from this lecture recording accurately and verbatim. "
-            "Preserve technical terms, formulas, and equations cleanly with proper punctuation. "
-            "Do NOT summarize, omit sections, or invent content not spoken in the audio. "
-            "If no intelligible speech exists, return an empty string for transcript. "
-            'Return JSON with keys "transcript" and "language" (ISO 639-1 code such as "en").'
-        )
-
-        if 0 < file_size <= INLINE_AUDIO_LIMIT_BYTES:
-            logger.info("Transcribing %s (%.2f MB) via Gemini inline audio...", target_path.name, file_size / (1024 * 1024))
-            audio_part = types.Part.from_bytes(data=target_path.read_bytes(), mime_type=mime_type)
-            contents = [audio_part, prompt]
-        else:
-            logger.info("Uploading %s (%.2f MB) to Gemini Files API for transcription...", target_path.name, file_size / (1024 * 1024))
-            uploaded_file = client.files.upload(file=str(target_path), config={"mime_type": mime_type})
-            contents = [uploaded_file, prompt]
-
-        result = generate_gemini_json(
-            client,
-            contents=contents,
-            system_instruction="You are a verbatim academic speech-to-text transcription engine.",
-            temperature=0.0,
-            response_schema=TranscriptionResponseSchema,
-        )
+        logger.info("Starting Whisper transcription on %s...", target_path.name)
+        result = model.transcribe(str(target_path), fp16=False)
     except Exception as exc:
-        clean_err = extract_gemini_error_message(exc)
         logger.error(
-            "Gemini audio transcription failed for %s after %.2f seconds: %s\n%s",
+            "Whisper audio transcription failed for %s after %.2f seconds:\n%s",
             file_path,
-            time.perf_counter() - started_at,
-            clean_err,
+            time.perf_counter() - model_loaded_at,
             traceback.format_exc(),
         )
-        raise RuntimeError(f"Gemini transcription failed: {clean_err}") from exc
+        raise RuntimeError(f"Whisper transcription failed: {exc}") from exc
     finally:
-        if client and uploaded_file and getattr(uploaded_file, "name", None):
-            try:
-                client.files.delete(name=uploaded_file.name)
-            except Exception:
-                pass
         if target_path != path and target_path.is_file():
             try:
                 target_path.unlink()
             except Exception:
                 pass
 
-    transcript = str(result.get("transcript", "")).strip()
+    raw_text = result.get("text")
+    transcript = raw_text.strip() if isinstance(raw_text, str) else ""
     language = str(result.get("language") or "en").strip() or "en"
+    completed_at = time.perf_counter()
+
     logger.info(
-        "Gemini transcription completed in %.2fs (transcript_chars=%d language=%s)",
-        time.perf_counter() - started_at,
+        "Whisper timing: model_load=%.2fs inference=%.2fs total=%.2fs transcript_chars=%d language=%s",
+        model_loaded_at - started_at,
+        completed_at - model_loaded_at,
+        completed_at - started_at,
         len(transcript),
         language,
     )

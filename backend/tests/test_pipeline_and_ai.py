@@ -80,24 +80,25 @@ class TestPipelineAndAI(unittest.TestCase):
         self.assertGreaterEqual(res["coverage_percentage"], 0.0)
         self.assertIn("covered_segments", res)
 
-    @patch("app.transcription.get_gemini_client")
-    def test_06_mocked_gemini_audio_transcription(self, mock_get_client):
-        """Verify native Gemini audio transcription workflow for inline audio files."""
+    @patch("app.transcription.load_model")
+    def test_06_mocked_whisper_audio_transcription(self, mock_load_model):
+        """Verify Whisper audio transcription workflow and cleaned transcript return."""
         from app.transcription import transcribe_audio
 
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-        mock_client.models.generate_content.return_value = SimpleNamespace(
-            text='{"transcript": "This is a transcribed lecture on microeconomics.", "language": "en"}'
-        )
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {
+            "text": "  This is a transcribed lecture on microeconomics.  ",
+            "language": "en",
+        }
+        mock_load_model.return_value = mock_model
 
         with patch("pathlib.Path.is_file", return_value=True), patch(
             "pathlib.Path.stat", return_value=SimpleNamespace(st_size=2048)
-        ), patch("pathlib.Path.read_bytes", return_value=b"ID3mockaudio"):
+        ):
             result = transcribe_audio("dummy_lecture.mp3")
             self.assertEqual(result["transcript"], "This is a transcribed lecture on microeconomics.")
             self.assertEqual(result["language"], "en")
-            mock_client.models.generate_content.assert_called_once()
+            mock_model.transcribe.assert_called_once()
 
     @patch("app.notes_generator.get_gemini_client")
     def test_07_mocked_notes_generation(self, mock_get_client):
@@ -209,25 +210,26 @@ class TestPipelineAndAI(unittest.TestCase):
         self.assertEqual(len(res["flashcards"]), 1)
         self.assertIn("mathematical model", res["flashcards"][0]["answer"])
 
-    @patch("app.transcription.get_gemini_client")
-    def test_11_mocked_gemini_large_audio_files_upload(self, mock_get_client):
-        """Verify audio files >15MB use Gemini Files API upload and delete uploaded handle."""
+    @patch("app.transcription.load_model")
+    @patch("app.transcription._convert_video_to_audio_if_needed")
+    def test_11_mocked_whisper_mp4_audio_extraction(self, mock_extract, mock_load_model):
+        """Verify MP4 uploads run ffmpeg audio pre-extraction before Whisper transcription."""
+        from pathlib import Path
         from app.transcription import transcribe_audio
 
-        mock_client = MagicMock()
-        mock_get_client.return_value = mock_client
-        mock_client.files.upload.return_value = SimpleNamespace(name="files/audio-123")
-        mock_client.models.generate_content.return_value = SimpleNamespace(
-            text='{"transcript": "Large lecture audio transcript.", "language": "en"}'
-        )
+        extracted_wav = Path("large_lecture.extracted.wav")
+        mock_extract.return_value = extracted_wav
+        mock_model = MagicMock()
+        mock_model.transcribe.return_value = {"text": "MP4 lecture transcript via Whisper.", "language": "en"}
+        mock_load_model.return_value = mock_model
 
         with patch("pathlib.Path.is_file", return_value=True), patch(
             "pathlib.Path.stat", return_value=SimpleNamespace(st_size=18 * 1024 * 1024)
-        ):
-            result = transcribe_audio("large_lecture.mp3")
-            self.assertEqual(result["transcript"], "Large lecture audio transcript.")
-            mock_client.files.upload.assert_called_once()
-            mock_client.files.delete.assert_called_once_with(name="files/audio-123")
+        ), patch("pathlib.Path.unlink"):
+            result = transcribe_audio("large_lecture.mp4")
+            self.assertEqual(result["transcript"], "MP4 lecture transcript via Whisper.")
+            mock_extract.assert_called_once()
+            mock_model.transcribe.assert_called_once_with(str(extracted_wav), fp16=False)
 
     @patch("app.coverage_checker.get_gemini_client")
     def test_12_mocked_gemini_coverage_audit(self, mock_get_client):

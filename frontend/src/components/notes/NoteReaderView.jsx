@@ -188,7 +188,7 @@ export default function NoteReaderView({
           <LoaderCircle className="spin" size={36} color="var(--accent)" aria-hidden="true" />
           <h2>Synthesizing Study Sheet with AI...</h2>
           <p>
-            Gemini audio transcription and study-sheet analysis are currently active. This page
+            Whisper audio transcription and Gemini study-sheet synthesis are currently active. This page
             will automatically refresh when the notes are ready.
           </p>
           {handleRetryLecture && selectedLecture?.id && (

@@ -1076,7 +1076,7 @@ function App() {
                   </p>
                   <div className="stitch-hero-badges stitch-hero-chips">
                     <span className="stitch-chip stitch-hero-badge">
-                      <Volume2 size={13} /> Gemini Audio Transcription
+                      <Volume2 size={13} /> Whisper Audio Transcription
                     </span>
                     <span className="stitch-chip stitch-hero-badge">
                       <Sparkles size={13} /> Gemini AI Synthesis

@@ -111,7 +111,7 @@ export default function WorkspaceStudio({
                   <div className="file-info">
                     <strong className="file-name">{file.name}</strong>
                     <span className="file-subtext">
-                      {(file.size / (1024 * 1024)).toFixed(2)} MB · Ready for Gemini audio transcription
+                      {(file.size / (1024 * 1024)).toFixed(2)} MB · Ready for Whisper transcription
                     </span>
                   </div>
                 </div>

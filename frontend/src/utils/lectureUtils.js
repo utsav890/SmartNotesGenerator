@@ -48,7 +48,7 @@ Finally, the grand finale of energy production is Oxidative Phosphorylation alon
 
 export const PROCESSING_STAGES = [
   { id: 1, name: "Audio Uploaded" },
-  { id: 2, name: "Gemini Audio Transcription" },
+  { id: 2, name: "Whisper Audio Transcription" },
   { id: 3, name: "Transcript Cleaning" },
   { id: 4, name: "Topic Segmentation" },
   { id: 5, name: "Embedding Generation" },

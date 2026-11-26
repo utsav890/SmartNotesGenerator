@@ -381,7 +381,7 @@ def on_startup():
     get_and_validate_jwt_secret()
     if not os.getenv("GEMINI_API_KEY", "").strip() or os.getenv("GEMINI_API_KEY", "").strip() == "your_gemini_api_key_here":
         logger.warning(
-            "GEMINI_API_KEY is not configured; Gemini audio transcription, note synthesis, quizzes, and Q&A will be unavailable."
+            "GEMINI_API_KEY is not configured; Gemini note synthesis, quizzes, and Q&A will be unavailable."
         )
 
     # Offload blocking database operations to background daemon thread so Uvicorn binds port immediately
@@ -1099,7 +1099,7 @@ def run_lecture_synthesis(lecture_id: int, user_id: int):
                 if not lecture.audio_path or not Path(lecture.audio_path).is_file():
                     raise ValueError("No transcript or audio recording available to synthesize.")
 
-                logger.info("Stage 1/3: Transcribing audio (%s) with Gemini AI...", lecture.audio_path)
+                logger.info("Stage 1/3: Transcribing audio (%s) with Whisper...", lecture.audio_path)
                 trans_result = transcribe_audio(lecture.audio_path)
                 transcript_text = trans_result.get("transcript", "").strip()
                 if not transcript_text:

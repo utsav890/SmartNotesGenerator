@@ -37,6 +37,7 @@ narwhals==2.26.0
 networkx==3.5
 numba==0.67.0
 numpy==2.2.6
+openai-whisper==20250625
 packaging==26.3
 playwright==1.63.0
 portalocker==3.2.0
