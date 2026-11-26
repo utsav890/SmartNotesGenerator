@@ -1164,7 +1164,7 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
   justify-content: space-between;
   overflow-y: auto;
   z-index: 50;
-  padding: 16px;
+  padding: 16px 12px;
   transition: transform 0.25s ease;
 }
 
@@ -1275,8 +1275,8 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
 .stitch-user-profile-row {
   display: flex;
   align-items: center;
-  gap: 8px;
-  padding: 8px;
+  gap: 7px;
+  padding: 8px 7px;
   border-radius: 10px;
   background: var(--stitch-surface-low);
   border: 1px solid var(--stitch-border-subtle);
@@ -1284,12 +1284,12 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
 }
 
 .stitch-avatar-circle {
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   border-radius: 50%;
   background: var(--stitch-primary);
   color: #ffffff;
-  font-size: 0.78rem;
+  font-size: 0.74rem;
   font-weight: 700;
   display: grid;
   place-items: center;
@@ -1305,7 +1305,7 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
 }
 
 .stitch-user-info-text .user-name {
-  font-size: 0.82rem;
+  font-size: 0.8rem;
   font-weight: 600;
   color: var(--stitch-on-surface);
   white-space: nowrap;
@@ -1314,7 +1314,7 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
 }
 
 .stitch-user-info-text .user-email {
-  font-size: 0.75rem;
+  font-size: 0.69rem;
   color: var(--stitch-on-surface-variant);
   white-space: nowrap;
   overflow: hidden;
@@ -2164,6 +2164,31 @@ button:disabled { opacity: .55; cursor: not-allowed; pointer-events: none; }
   border-radius: 12px;
   border: 1px solid var(--border-subtle);
   background: var(--bg-surface);
+}
+
+.stitch-table-empty {
+  padding: 40px 24px;
+  text-align: center;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-primary);
+}
+
+.stitch-table-empty h4 {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin: 4px 0 0;
+}
+
+.stitch-table-empty p {
+  font-size: 0.86rem;
+  color: var(--text-secondary);
+  margin: 0;
+  max-width: 440px;
 }
 
 .stitch-table-scroll,

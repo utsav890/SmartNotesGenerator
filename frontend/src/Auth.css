@@ -1542,6 +1542,14 @@
   color: #0f172a;
 }
 
+[data-theme="light"] .auth-brand-name {
+  color: #0f172a;
+}
+
+[data-theme="light"] .auth-brand-tagline {
+  color: #475569;
+}
+
 [data-theme="light"] .auth-title,
 [data-theme="light"] .auth-card-title {
   color: #0f172a;
