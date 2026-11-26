@@ -1,6 +1,15 @@
 import { Menu, X, Search, Bell } from "lucide-react";
 import UserProfileMenu from "../auth/UserProfileMenu";
 
+const VIEW_TITLES = {
+  dashboard: "Dashboard",
+  "my-notes": "My Notes",
+  chat: "Chat with Lecture",
+  quiz: "Lecture Quiz",
+  security: "Security & Account",
+  admin: "Admin Command Center",
+};
+
 export default function Topbar({
   view,
   mobileMenuOpen,
@@ -33,21 +42,7 @@ export default function Topbar({
         <div className="stitch-breadcrumbs">
           <span className="crumb-root">Workspace</span>
           <span className="crumb-sep">/</span>
-          <span className="crumb-current">
-            {view === "dashboard"
-              ? "Dashboard"
-              : view === "my-notes"
-              ? "My Notes"
-              : view === "chat"
-              ? "Chat with Lecture"
-              : view === "quiz"
-              ? "Lecture Quiz"
-              : view === "security"
-              ? "Security & Account"
-              : view === "admin"
-              ? "Admin Command Center"
-              : "Study Sheets"}
-          </span>
+          <span className="crumb-current">{VIEW_TITLES[view] || "Study Sheets"}</span>
         </div>
       </div>
 

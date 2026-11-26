@@ -11,6 +11,7 @@ import {
   ArrowUpRight,
   Trash2
 } from "lucide-react";
+import { isLectureReady } from "../../utils/lectureUtils";
 
 export default function MyNotesView({
   lectures,
@@ -58,9 +59,9 @@ export default function MyNotesView({
           {searchQuery && (
             <button
               type="button"
+              className="clear-search-btn"
               onClick={() => setSearchQuery("")}
               aria-label="Clear search"
-              style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}
             >
               <X size={16} />
             </button>
@@ -71,11 +72,8 @@ export default function MyNotesView({
       {/* Status Notice */}
       {libraryNotice && (
         <p className="library-notice" role="status">
-          <CircleCheck
-            size={16}
-            style={{ verticalAlign: "middle", marginRight: "6px" }}
-          />
-          {libraryNotice}
+          <CircleCheck size={16} aria-hidden="true" />
+          <span>{libraryNotice}</span>
         </p>
       )}
 
@@ -148,7 +146,7 @@ export default function MyNotesView({
       {!notesLoading && !notesError && filteredLectures.length > 0 && (
         <div className="lecture-grid">
           {filteredLectures.map((lecture) => {
-            const isReady = lecture.has_notes || lecture.status === "completed";
+            const isReady = isLectureReady(lecture);
             const isFailed = lecture.status === "failed";
             const isProcessing = !isReady && !isFailed;
             const isConfirming = confirmDeleteId === lecture.id;
@@ -238,29 +236,22 @@ export default function MyNotesView({
                     </div>
                   </div>
                 ) : isProcessing ? (
-                  <div
-                    className="lecture-card-footer"
-                    style={{ color: "var(--accent-primary)", display: "flex", alignItems: "center" }}
-                  >
-                    <LoaderCircle size={14} className="spin" style={{ marginRight: 6 }} />
+                  <div className="lecture-card-footer lecture-card-status is-processing">
+                    <LoaderCircle size={14} className="spin" aria-hidden="true" />
                     <span>Synthesizing...</span>
                   </div>
                 ) : isFailed ? (
-                  <div
-                    className="lecture-card-footer"
-                    style={{ color: "var(--danger)", display: "flex", alignItems: "center", justifyContent: "space-between" }}
-                  >
+                  <div className="lecture-card-footer lecture-card-status is-failed">
                     <span>Failed</span>
                     <button
                       type="button"
-                      className="stitch-table-btn retry-btn"
-                      style={{ padding: "4px 8px", fontSize: "0.78rem" }}
+                      className="stitch-table-btn retry-btn compact-retry-btn"
                       onClick={(e) => {
                         e.stopPropagation();
-                        if (handleRetryLecture) handleRetryLecture(lecture.id, e);
+                        handleRetryLecture?.(lecture.id, e);
                       }}
                     >
-                      <RotateCcw size={12} style={{ marginRight: 4 }} /> Retry
+                      <RotateCcw size={12} aria-hidden="true" /> Retry
                     </button>
                   </div>
                 ) : (

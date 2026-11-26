@@ -1505,14 +1505,6 @@
   box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
 }
 
-[data-theme="light"] .security-card-title {
-  color: #0f172a;
-}
-
-[data-theme="light"] .security-card-desc {
-  color: #475569;
-}
-
 [data-theme="light"] .sec-info-label {
   color: #64748b;
 }
@@ -1550,25 +1542,10 @@
   color: #475569;
 }
 
-[data-theme="light"] .auth-title,
 [data-theme="light"] .auth-card-title {
   color: #0f172a;
 }
 
-[data-theme="light"] .auth-subtitle,
 [data-theme="light"] .auth-card-subtitle {
-  color: #475569;
-}
-
-[data-theme="light"] .session-item {
-  background: #f8fafc;
-  border-color: #e2e8f0;
-}
-
-[data-theme="light"] .session-device-name {
-  color: #0f172a;
-}
-
-[data-theme="light"] .session-detail {
   color: #475569;
 }

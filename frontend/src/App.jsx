@@ -36,136 +36,18 @@ import NoteReaderView from "./components/notes/NoteReaderView";
 import QuizView from "./components/quiz/QuizView";
 import MyNotesView from "./components/library/MyNotesView";
 import ChatView from "./components/chat/ChatView";
-
-const API_BASE_URL =
-  import.meta.env.VITE_API_BASE_URL !== undefined
-    ? import.meta.env.VITE_API_BASE_URL
-    : "http://127.0.0.1:8000";
-
-// Curated high-yield samples for instant 1-click testing
-const SAMPLE_TRANSCRIPTS = {
-  ml: {
-    label: "AI & Neural Networks",
-    title: "Introduction to Artificial Neural Networks and Backpropagation",
-    text: `Welcome everyone to Lecture 4 on Neural Networks and Deep Learning. Today we are exploring the architecture of artificial neural networks inspired by biological neurons in the human brain.
-
-An artificial neuron, or perceptron, receives multiple inputs x1, x2, up to xn. Each input is multiplied by an associated weight w1, w2, through wn. The weighted sum of all inputs is calculated, and a bias term b is added. Mathematically, z equals the summation of wi times xi plus b.
-
-This linear combination is then passed through a non-linear activation function. Without non-linear activation functions like ReLU, Sigmoid, or GELU, a deep network of multiple layers would simply collapse into a single linear transformation, regardless of how many layers it contains. The Rectified Linear Unit, or ReLU, defined as f(x) = max(0, x), is particularly popular because it avoids the vanishing gradient problem during backpropagation and enables faster convergence.
-
-Next, let's understand how a network learns: gradient descent and backpropagation. During the forward pass, predictions are generated, and a loss function measures the discrepancy between predicted output and true target labels. During the backward pass, the chain rule of calculus is applied backwards through every layer to compute the partial derivative of the loss with respect to each weight. These gradients are then used by optimizers such as Adam or Stochastic Gradient Descent to adjust the weights and minimize prediction error.`
-  },
-  bio: {
-    label: "Cellular Biology",
-    title: "Cellular Respiration and ATP Synthesis",
-    text: `Good morning class. Today we will break down Cellular Respiration, the fundamental biochemical process through which eukaryotic cells convert glucose and oxygen into usable energy in the form of ATP.
-
-Cellular respiration consists of three fundamental stages: Glycolysis, the Citric Acid Cycle (also known as the Krebs cycle), and Oxidative Phosphorylation.
-
-Stage one is Glycolysis, which takes place in the cytoplasm of the cell and does not require oxygen. In glycolysis, a single six-carbon glucose molecule is broken down into two three-carbon molecules of pyruvate, yielding a net production of 2 ATP and 2 NADH molecules.
-
-Stage two occurs inside the mitochondrial matrix: the Krebs cycle. Here, pyruvate is converted into Acetyl-CoA, which enters an enzymatic cycle that generates additional NADH and FADH2 high-energy electron carriers, along with 2 ATP molecules and releasing carbon dioxide as a metabolic byproduct.
-
-Finally, the grand finale of energy production is Oxidative Phosphorylation along the inner mitochondrial membrane. The electron transport chain passes electrons down protein complexes, pumping protons across the membrane to create a steep electrochemical gradient. ATP Synthase, an extraordinary rotary molecular motor, harnesses this proton motive force to synthesize approximately 28 to 32 ATP molecules per glucose molecule.`
-  }
-};
-
-// Safely perform API requests with auth token headers
-async function apiRequest(url, options = {}) {
-  const token = localStorage.getItem("smartnotes_token");
-  const headers = {
-    ...(options.headers || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  };
-
-  const response = await fetch(`${API_BASE_URL}${url}`, {
-    ...options,
-    headers,
-    credentials: "include"
-  });
-  const data = await response.json().catch(() => ({}));
-
-  if (!response.ok) {
-    if (response.status === 401 && !url.includes("/api/auth/")) {
-      localStorage.removeItem("smartnotes_token");
-      const currentPath = window.location.pathname;
-      if (currentPath !== "/login") {
-        window.location.href = `/login?redirect=${encodeURIComponent(currentPath)}`;
-      }
-    }
-    throw new Error(
-      data.detail ||
-        data.message ||
-        `Request failed with status ${response.status}`
-    );
-  }
-
-  return data;
-}
-
-const PROCESSING_STAGES = [
-  { id: 1, name: "Audio Uploaded" },
-  { id: 2, name: "Whisper Transcription" },
-  { id: 3, name: "Transcript Cleaning" },
-  { id: 4, name: "Topic Segmentation" },
-  { id: 5, name: "Embedding Generation" },
-  { id: 6, name: "Qdrant Storage" },
-  { id: 7, name: "Groq Notes Generation" },
-  { id: 8, name: "Coverage Validation" },
-  { id: 9, name: "Completed" }
-];
-
-function getActiveStep(statusMsg) {
-  if (!statusMsg) return 1;
-  const lower = statusMsg.toLowerCase();
-  if (lower.includes("uploading") || lower.includes("upload")) return 1;
-  if (lower.includes("whisper") || lower.includes("transcribing")) return 2;
-  if (lower.includes("clean")) return 3;
-  if (lower.includes("segment")) return 4;
-  if (lower.includes("embed")) return 5;
-  if (lower.includes("qdrant") || lower.includes("vector")) return 6;
-  if (lower.includes("groq") || lower.includes("generating")) return 7;
-  if (lower.includes("cover") || lower.includes("validat") || lower.includes("loading")) return 8;
-  if (lower.includes("ready") || lower.includes("success")) return 9;
-  return 7;
-}
-
-function getSubject(lec) {
-  const title = (lec?.title || "").toLowerCase();
-  if (title.includes("dbms") || title.includes("database") || title.includes("sql") || title.includes("concurrency")) return "DBMS";
-  if (title.includes("ai") || title.includes("search") || title.includes("a*") || title.includes("intelligence")) return "Artificial Intelligence";
-  if (title.includes("coa") || title.includes("architecture") || title.includes("memory") || title.includes("hierarchy")) return "Computer Architecture";
-  if (title.includes("os") || title.includes("operating") || title.includes("thread") || title.includes("cpu") || title.includes("scheduling")) return "Operating Systems";
-  if (title.includes("ml") || title.includes("gradient") || title.includes("machine learning") || title.includes("descent")) return "Machine Learning";
-  if (title.includes("network") || title.includes("tcp") || title.includes("congestion") || title.includes("cn")) return "Computer Networks";
-  if (title.includes("se") || title.includes("agile") || title.includes("scrum") || title.includes("software")) return "Software Engineering";
-  if (title.includes("bio") || title.includes("cell") || title.includes("atp") || title.includes("respiration")) return "Cellular Biology";
-  return "Computer Science";
-}
-
-function formatDuration(sec) {
-  if (sec === null || sec === undefined || sec === "" || isNaN(Number(sec))) return "—";
-  const totalSec = Math.max(0, Math.floor(Number(sec)));
-  const m = Math.floor(totalSec / 60);
-  const s = totalSec % 60;
-  if (m >= 60) {
-    const h = Math.floor(m / 60);
-    const remM = m % 60;
-    return `${h}:${String(remM).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
-  }
-  return `${m}:${String(s).padStart(2, "0")}`;
-}
-
-function formatDate(dateStr) {
-  if (!dateStr) return "—";
-  try {
-    const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return "—";
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
-  } catch {
-    return "—";
-  }
-}
+import {
+  SAMPLE_TRANSCRIPTS,
+  PROCESSING_STAGES,
+  apiRequest,
+  buildNotesExportText,
+  formatDate,
+  formatDuration,
+  getActiveStep,
+  getSubject,
+  isLectureProcessing,
+  isLectureReady
+} from "./utils/lectureUtils";
 
 function App() {
   const { user, isAuthenticated, isLoading, isAdmin, logout } = useAuth();
@@ -414,43 +296,23 @@ function App() {
 
   // Polling: background poll every 4s whenever any lecture in library is processing
   useEffect(() => {
-    if (!isAuthenticated || isLoading) return;
-    const hasProcessing = lectures.some(
-      (l) =>
-        l.status === "processing" ||
-        l.status === "uploaded" ||
-        l.status === "transcribed"
-    );
-    if (!hasProcessing) return;
-
-    const intervalId = setInterval(() => {
-      fetchLecturesAndStats();
-    }, 4000);
-
+    if (!isAuthenticated || isLoading || !lectures.some(isLectureProcessing)) return;
+    const intervalId = setInterval(fetchLecturesAndStats, 4000);
     return () => clearInterval(intervalId);
   }, [lectures, isAuthenticated, isLoading]);
 
   // Polling: active poll every 4s when viewing a lecture in note-reader that is processing
   useEffect(() => {
-    if (!isAuthenticated || isLoading || view !== "note-reader" || !selectedLecture) return;
-    const isProcessing =
-      selectedLecture.status === "processing" ||
-      selectedLecture.status === "uploaded" ||
-      selectedLecture.status === "transcribed";
-
-    if (!isProcessing) return;
+    if (!isAuthenticated || isLoading || view !== "note-reader" || !isLectureProcessing(selectedLecture)) return;
 
     const intervalId = setInterval(async () => {
       try {
         const updated = await apiRequest(`/lectures/${selectedLecture.id}`);
-        if (!updated || !updated.id) return;
+        if (!updated?.id) return;
 
-        if (
-          updated.status !== selectedLecture.status ||
-          updated.has_notes !== selectedLecture.has_notes
-        ) {
+        if (updated.status !== selectedLecture.status || updated.has_notes !== selectedLecture.has_notes) {
           setSelectedLecture(updated);
-          if (updated.status === "completed" || updated.has_notes) {
+          if (isLectureReady(updated)) {
             const notesResult = await apiRequest(`/lectures/${updated.id}/notes`);
             const savedNote = Array.isArray(notesResult?.notes) ? notesResult.notes[0] : null;
             if (savedNote) {
@@ -733,7 +595,7 @@ function App() {
     setView("chat");
     fetchLecturesAndStats();
 
-    if (validArg && (validArg.has_notes || validArg.status === "completed")) {
+    if (validArg && isLectureReady(validArg)) {
       selectChatLecture(validArg);
       return;
     }
@@ -873,57 +735,29 @@ function App() {
     fetchLecturesAndStats();
 
     const queryLectureId = parseInt(searchParams.get("lectureId") || "", 10);
+    const routeTargetId = pathname.startsWith("/lecture/")
+      ? parseInt(pathname.split("/lecture/")[1], 10)
+      : queryLectureId;
 
-    if (pathname.startsWith("/lecture/")) {
-      const lectureId = parseInt(pathname.split("/lecture/")[1], 10);
-      if (lectureId && (!selectedLecture || selectedLecture.id !== lectureId)) {
-        apiRequest(`/lectures/${lectureId}`)
-          .then((lectureData) => {
-            if (lectureData && lectureData.id) {
-              openSavedNote(lectureData);
-            }
-          })
-          .catch((err) => {
-            setNotesError(err.message || "Failed to load lecture");
-          });
+    if (!routeTargetId || (selectedLecture?.id === routeTargetId)) return;
+
+    const handlers = {
+      "/study-sheets": { run: openSavedNote, onErr: (msg) => setNotesError(msg || "Failed to load lecture") },
+      "/chat": { run: selectChatLecture, onErr: (msg) => setHistoryError(msg || "Failed to load lecture conversation") },
+      "/quizzes": {
+        skip: quizLoading,
+        run: generateAndOpenQuiz,
+        onErr: (msg) => setQuizError(msg || "Could not prepare quiz for this lecture.")
       }
-    } else if (pathname === "/study-sheets" && queryLectureId) {
-      if (!selectedLecture || selectedLecture.id !== queryLectureId) {
-        apiRequest(`/lectures/${queryLectureId}`)
-          .then((lectureData) => {
-            if (lectureData && lectureData.id) {
-              openSavedNote(lectureData);
-            }
-          })
-          .catch((err) => {
-            setNotesError(err.message || "Failed to load lecture");
-          });
-      }
-    } else if (pathname === "/chat" && queryLectureId) {
-      if (!selectedLecture || selectedLecture.id !== queryLectureId) {
-        apiRequest(`/lectures/${queryLectureId}`)
-          .then((lectureData) => {
-            if (lectureData && lectureData.id) {
-              selectChatLecture(lectureData);
-            }
-          })
-          .catch((err) => {
-            setHistoryError(err.message || "Failed to load lecture conversation");
-          });
-      }
-    } else if (pathname === "/quizzes" && queryLectureId) {
-      if ((!selectedLecture || selectedLecture.id !== queryLectureId) && !quizLoading) {
-        apiRequest(`/lectures/${queryLectureId}`)
-          .then((lectureData) => {
-            if (lectureData && lectureData.id) {
-              generateAndOpenQuiz(lectureData);
-            }
-          })
-          .catch((err) => {
-            setQuizError(err.message || "Could not prepare quiz for this lecture.");
-          });
-      }
-    }
+    };
+    const handler = pathname.startsWith("/lecture/") ? handlers["/study-sheets"] : handlers[pathname];
+    if (!handler || handler.skip) return;
+
+    apiRequest(`/lectures/${routeTargetId}`)
+      .then((lectureData) => {
+        if (lectureData?.id) handler.run(lectureData);
+      })
+      .catch((err) => handler.onErr(err.message));
   }, [pathname, searchParams, isAuthenticated, isLoading]);
 
   const selectQuizAnswer = (answer) => {
@@ -1027,36 +861,8 @@ function App() {
   };
 
   const downloadNotes = () => {
-    if (!notes) return;
-    const text = [
-      notes.title,
-      "=".repeat(notes.title.length),
-      "",
-      "EXECUTIVE SUMMARY",
-      notes.summary,
-      "",
-      "STRUCTURED SECTIONS",
-      ...notes.sections.flatMap((section, index) => [
-        "",
-        `[${index + 1}] ${section.heading || `Section ${index + 1}`}`,
-        section.content || "",
-      ]),
-      ...(notes.key_points.length
-        ? ["", "KEY TAKEAWAYS & CONCEPTS", ...notes.key_points.map((point) => `• ${point}`)]
-        : []),
-      ...(notes.revision_questions.length
-        ? [
-            "",
-            "CHECK YOUR UNDERSTANDING (REVISION QUESTIONS)",
-            ...notes.revision_questions.map((question, index) => {
-              const qText = typeof question === "object" ? question.question : question;
-              const aText = typeof question === "object" ? `\nModel Answer: ${question.answer}` : "";
-              return `${index + 1}. ${qText}${aText}`;
-            }),
-          ]
-        : []),
-    ].join("\n");
-
+    const text = buildNotesExportText(notes, { markdown: false });
+    if (!text) return;
     const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -1070,26 +876,8 @@ function App() {
   };
 
   const copyNotesToClipboard = async () => {
-    if (!notes) return;
-    const text = [
-      `# ${notes.title}`,
-      "",
-      `> ${notes.summary}`,
-      "",
-      "## Sections",
-      ...notes.sections.map((s, idx) => `### ${idx + 1}. ${s.heading}\n${s.content}`),
-      "",
-      "## Key Takeaways",
-      ...notes.key_points.map((k) => `- ${k}`),
-      "",
-      "## Revision Questions",
-      ...notes.revision_questions.map((q, idx) => {
-        const qText = typeof q === "object" ? q.question : q;
-        const aText = typeof q === "object" ? `\n*Model Answer:* ${q.answer}` : "";
-        return `${idx + 1}. ${qText}${aText}`;
-      })
-    ].join("\n");
-
+    const text = buildNotesExportText(notes, { markdown: true });
+    if (!text) return;
     try {
       await navigator.clipboard.writeText(text);
       setCopied(true);
@@ -1162,8 +950,8 @@ function App() {
   );
 
   const totalLecturesCount = stats?.total_lectures ?? lectures.length;
-  const readyCount = stats?.notes_ready ?? lectures.filter((l) => l.has_notes || l.status === "completed").length;
-  const processingCount = lectures.filter((l) => l.status === "processing" || l.status === "transcribed" || l.status === "uploaded").length;
+  const readyCount = stats?.notes_ready ?? lectures.filter(isLectureReady).length;
+  const processingCount = lectures.filter(isLectureProcessing).length;
   const failedCount = lectures.filter((l) => l.status === "failed").length;
   const totalDurationSec =
     stats?.total_duration_seconds ??
@@ -1176,20 +964,16 @@ function App() {
     const query = recentLecturesSearch.toLowerCase().trim();
     const matchesQuery = !query || title.includes(query) || getSubject(lec).toLowerCase().includes(query);
 
-    let matchesStatus = true;
-    if (statusFilter === "ready") {
-      matchesStatus = lec.has_notes || lec.status === "completed";
-    } else if (statusFilter === "processing") {
-      matchesStatus = lec.status === "processing" || lec.status === "transcribed" || lec.status === "uploaded";
-    } else if (statusFilter === "failed") {
-      matchesStatus = lec.status === "failed";
-    }
+    const matchesStatus =
+      statusFilter === "ready"
+        ? isLectureReady(lec)
+        : statusFilter === "processing"
+        ? isLectureProcessing(lec)
+        : statusFilter === "failed"
+        ? lec.status === "failed"
+        : true;
 
-    let matchesSubject = true;
-    if (subjectFilter !== "all") {
-      matchesSubject = getSubject(lec) === subjectFilter;
-    }
-
+    const matchesSubject = subjectFilter === "all" || getSubject(lec) === subjectFilter;
     return matchesQuery && matchesStatus && matchesSubject;
   });
 
@@ -1458,7 +1242,6 @@ function App() {
               questionInputRef={questionInputRef}
               deleteTriggerRef={deleteTriggerRef}
               deleteDialogRef={deleteDialogRef}
-              deleteDialogOpen={deleteDialogOpen}
               setDeleteDialogOpen={setDeleteDialogOpen}
               deleteError={deleteError}
               setDeleteError={setDeleteError}

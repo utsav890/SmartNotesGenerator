@@ -9,13 +9,12 @@ import {
   Trash2,
   Clock,
   RotateCcw,
-  Sparkles,
-  Send,
-  BookOpen,
-  ArrowRight,
-  FileText
+  BookOpen
 } from "lucide-react";
 import NotesArticle from "./NotesArticle";
+import LectureSelector from "../shared/LectureSelector";
+import LectureQA from "../chat/LectureQA";
+import { isLectureProcessing, isLectureReady } from "../../utils/lectureUtils";
 
 export default function NoteReaderView({
   selectedLecture,
@@ -43,7 +42,6 @@ export default function NoteReaderView({
   questionInputRef,
   deleteTriggerRef,
   deleteDialogRef,
-  _deleteDialogOpen,
   setDeleteDialogOpen,
   deleteError,
   setDeleteError,
@@ -55,124 +53,35 @@ export default function NoteReaderView({
   setView,
   handleRetryLecture,
 }) {
-  const isProcessing =
-    selectedLecture &&
-    !notes &&
-    (selectedLecture.status === "processing" ||
-      selectedLecture.status === "uploaded" ||
-      selectedLecture.status === "transcribed");
-
+  const isProcessing = !notes && isLectureProcessing(selectedLecture);
   const isFailed =
     selectedLecture &&
     (selectedLecture.status === "failed" || (!notesLoading && !notes && Boolean(notesError)));
 
   if (!notesLoading && !notes && !isProcessing && !isFailed) {
-    const readyLectures = lectures.filter(
-      (lec) => lec.has_notes || lec.status === "completed"
-    );
+    const returnDashboard = () => {
+      resetWorkspace?.();
+      if (setView) setView("dashboard");
+      else openMyNotes();
+    };
 
     return (
-      <section className="reader-card" aria-label="Study Sheets Selection">
-        <button
-          type="button"
-          className="back-btn"
-          onClick={() => {
-            if (resetWorkspace) resetWorkspace();
-            if (setView) setView("dashboard");
-            else openMyNotes();
-          }}
-        >
-          <ArrowLeft size={16} aria-hidden="true" /> Back to Dashboard
-        </button>
-
-        <div className="study-sheet-selector-card">
-          <div className="selector-icon-badge">
-            <BookOpen size={28} />
-          </div>
-          <h2>Select a Lecture Study Sheet</h2>
-          <p>
-            Choose one of your synthesized lectures below to inspect structured notes, review key takeaways, and chat with AI Copilot.
-          </p>
-
-          {readyLectures.length > 0 ? (
-            <>
-              <div className="selector-dropdown-row">
-                <label htmlFor="study-sheet-select" className="selector-dropdown-label">
-                  Quick Select Lecture:
-                </label>
-                <select
-                  id="study-sheet-select"
-                  className="selector-dropdown-input"
-                  defaultValue=""
-                  onChange={(e) => {
-                    const selected = readyLectures.find((l) => String(l.id) === e.target.value);
-                    if (selected) openSavedNote(selected);
-                  }}
-                >
-                  <option value="" disabled>Choose a synthesized lecture...</option>
-                  {readyLectures.map((lec) => (
-                    <option key={lec.id} value={lec.id}>
-                      {lec.title} ({lec.audio_format || "Lecture Audio"})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="lecture-selector-grid">
-                {readyLectures.map((lec) => (
-                  <button
-                    key={lec.id}
-                    type="button"
-                    className="lecture-select-item"
-                    onClick={() => openSavedNote(lec)}
-                  >
-                    <div className="item-icon-wrapper">
-                      <FileText size={20} />
-                    </div>
-                    <div className="item-info">
-                      <span className="item-title">{lec.title}</span>
-                      <span className="item-meta">
-                        {lec.audio_format || "Lecture Audio"} • {lec.created_at ? new Date(lec.created_at).toLocaleDateString() : "Saved"}
-                      </span>
-                    </div>
-                    <div className="item-arrow-action">
-                      <span>View Notes</span>
-                      <ArrowRight size={16} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="selector-footer-action">
-                <button
-                  type="button"
-                  className="btn-secondary-link"
-                  onClick={() => {
-                    if (resetWorkspace) resetWorkspace();
-                    if (setView) setView("dashboard");
-                  }}
-                >
-                  <Sparkles size={14} /> Or Ingest a New Lecture
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="selector-empty-cta">
-              <p>No synthesized study sheets found in your library yet.</p>
-              <button
-                type="button"
-                className="stitch-primary-btn"
-                onClick={() => {
-                  if (resetWorkspace) resetWorkspace();
-                  if (setView) setView("dashboard");
-                }}
-              >
-                <Sparkles size={16} /> Go to Ingestion Studio
-              </button>
-            </div>
-          )}
-        </div>
-      </section>
+      <LectureSelector
+        ariaLabel="Study Sheets Selection"
+        sectionClassName="reader-card"
+        cardClassName="study-sheet-selector-card"
+        icon={<BookOpen size={28} />}
+        title="Select a Lecture Study Sheet"
+        description="Choose one of your synthesized lectures below to inspect structured notes, review key takeaways, and chat with AI Copilot."
+        selectId="study-sheet-select"
+        dropdownPlaceholder="Choose a synthesized lecture..."
+        emptyMessage="No synthesized study sheets found in your library yet."
+        actionLabel="View Notes"
+        readyLectures={lectures.filter(isLectureReady)}
+        onSelectLecture={openSavedNote}
+        onBack={returnDashboard}
+        onGoDashboard={returnDashboard}
+      />
     );
   }
 
@@ -204,7 +113,6 @@ export default function NoteReaderView({
             className="reader-quiz-btn"
             onClick={generateAndOpenQuiz}
             disabled={!isReady || quizLoading || notesLoading}
-            style={!isReady ? { opacity: 0.5, cursor: "not-allowed" } : {}}
             aria-busy={quizLoading}
           >
             {quizLoading ? (
@@ -220,7 +128,6 @@ export default function NoteReaderView({
             className="reader-ask-btn"
             onClick={jumpToQuestion}
             disabled={!isReady || questionSubmitting || notesLoading}
-            style={!isReady ? { opacity: 0.5, cursor: "not-allowed" } : {}}
             aria-controls="lecture-question"
           >
             <MessageCircleQuestion size={17} aria-hidden="true" />
@@ -234,13 +141,8 @@ export default function NoteReaderView({
             title="Copy Markdown"
             aria-label="Copy notes to clipboard"
             disabled={!isReady}
-            style={!isReady ? { opacity: 0.5, pointerEvents: "none" } : {}}
           >
-            {copied ? (
-              <Check size={18} color="var(--success)" />
-            ) : (
-              <Copy size={18} />
-            )}
+            {copied ? <Check size={18} color="var(--success)" /> : <Copy size={18} />}
           </button>
 
           <button
@@ -250,7 +152,6 @@ export default function NoteReaderView({
             title="Download Text File"
             aria-label="Download notes"
             disabled={!isReady}
-            style={!isReady ? { opacity: 0.5, pointerEvents: "none" } : {}}
           >
             <Download size={18} />
           </button>
@@ -273,12 +174,7 @@ export default function NoteReaderView({
 
       {isProcessing && (
         <div className="library-state" role="status">
-          <LoaderCircle
-            className="spin"
-            size={36}
-            color="var(--accent)"
-            aria-hidden="true"
-          />
+          <LoaderCircle className="spin" size={36} color="var(--accent)" aria-hidden="true" />
           <h2>Synthesizing Study Sheet with AI...</h2>
           <p>
             Whisper transcription and Groq analysis are currently active. This page
@@ -288,7 +184,6 @@ export default function NoteReaderView({
             <button
               type="button"
               className="secondary-btn"
-              style={{ marginTop: "12px" }}
               onClick={() => handleRetryLecture(selectedLecture.id)}
             >
               <RotateCcw size={16} /> Restart / Retry Synthesis
@@ -299,12 +194,7 @@ export default function NoteReaderView({
 
       {!isProcessing && notesLoading && (
         <div className="library-state" role="status">
-          <LoaderCircle
-            className="spin"
-            size={32}
-            color="var(--accent)"
-            aria-hidden="true"
-          />
+          <LoaderCircle className="spin" size={32} color="var(--accent)" aria-hidden="true" />
           <h2>Loading your study sheet</h2>
           <p>Formatting sections and retrieving lecture materials…</p>
         </div>
@@ -336,187 +226,23 @@ export default function NoteReaderView({
             <NotesArticle notes={notes} headingLevel={2} showTitle={false} />
           </div>
 
-          {/* AI Lecture Copilot (Q&A Section) */}
-          <section className="lecture-qa" aria-labelledby="lecture-qa-title">
-            <div className="lecture-qa-heading">
-              <div className="lecture-qa-icon" aria-hidden="true">
-                <MessageCircleQuestion size={22} />
-              </div>
-              <div>
-                <h2 id="lecture-qa-title">Ask AI About This Lecture</h2>
-                <p>
-                  Instant answers grounded strictly in this lecture’s transcript
-                  and notes.
-                </p>
-              </div>
-            </div>
-
-            {/* Quick suggested questions */}
-            <div className="qa-chips-row">
-              <span className="qa-chips-label">Suggested questions:</span>
-              <button
-                type="button"
-                className="qa-chip"
-                onClick={() => {
-                  setQuestion(
-                    "What are the 3 most crucial takeaways from this lecture?"
-                  );
-                  jumpToQuestion();
-                }}
-              >
-                💡 3 Crucial Takeaways
-              </button>
-              <button
-                type="button"
-                className="qa-chip"
-                onClick={() => {
-                  setQuestion(
-                    "Explain the main concept in simple, beginner-friendly terms."
-                  );
-                  jumpToQuestion();
-                }}
-              >
-                🧠 Explain in Simple Terms
-              </button>
-              <button
-                type="button"
-                className="qa-chip"
-                onClick={() => {
-                  setQuestion(
-                    "What potential exam questions could be asked based on this material?"
-                  );
-                  jumpToQuestion();
-                }}
-              >
-                🎯 Potential Exam Questions
-              </button>
-            </div>
-
-            {historyLoading && (
-              <p className="qa-state" role="status">
-                <LoaderCircle className="spin" size={18} aria-hidden="true" />
-                Loading conversation history…
-              </p>
-            )}
-
-            {!historyLoading && historyError && (
-              <div className="qa-error" role="alert">
-                <p>{historyError}</p>
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={reloadConversation}
-                >
-                  Retry loading conversation
-                </button>
-              </div>
-            )}
-
-            {!historyLoading && !historyError && conversation.length === 0 && (
-              <p className="qa-empty">
-                No questions asked yet. Ask about definitions, formulas,
-                derivations, or confusing concepts!
-              </p>
-            )}
-
-            {conversation.length > 0 && (
-              <ol
-                className="qa-conversation"
-                aria-label="Saved lecture question and answer history"
-                aria-live="polite"
-                aria-relevant="additions"
-              >
-                {conversation.map((message) => (
-                  <li
-                    className={`qa-message qa-message-${message.role}`}
-                    key={message.id}
-                  >
-                    <strong>
-                      {message.role === "assistant" ? "Study Copilot" : "You"}
-                    </strong>
-                    <p>{message.content}</p>
-                    {message.role === "assistant" && (
-                      <>
-                        {message.confidence && (
-                          <div className="qa-answer-confidence">
-                            <Sparkles size={13} color="var(--accent)" />
-                            Confidence: {message.confidence}
-                          </div>
-                        )}
-                        {message.sources?.length > 0 && (
-                          <div className="qa-answer-sources">
-                            <h4>Cited Sources</h4>
-                            <ul>
-                              {message.sources.map((source, index) => (
-                                <li key={`${message.id}-source-${index}`}>
-                                  {source}
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </>
-                    )}
-                  </li>
-                ))}
-              </ol>
-            )}
-
-            {questionError && (
-              <p className="qa-error" id="question-error" role="alert">
-                {questionError}
-              </p>
-            )}
-
-            <form className="qa-form" onSubmit={submitQuestion}>
-              <textarea
-                ref={questionInputRef}
-                id="lecture-question"
-                value={question}
-                onChange={(event) => {
-                  setQuestion(event.target.value);
-                  if (questionError) setQuestionError("");
-                }}
-                maxLength={4000}
-                rows={3}
-                required
-                aria-invalid={questionError ? "true" : undefined}
-                aria-describedby={`question-hint${
-                  questionError ? " question-error" : ""
-                }`}
-                disabled={questionSubmitting}
-                placeholder="Type your question about this lecture..."
-              />
-              <div className="qa-form-footer">
-                <span className="qa-hint" id="question-hint">
-                  {question.length}/4000 characters · Answers grounded in lecture
-                  notes
-                </span>
-                <button
-                  type="submit"
-                  className="qa-submit-btn"
-                  disabled={questionSubmitting || !question.trim()}
-                  aria-busy={questionSubmitting}
-                >
-                  {questionSubmitting ? (
-                    <>
-                      <LoaderCircle
-                        className="spin"
-                        size={16}
-                        aria-hidden="true"
-                      />
-                      Thinking…
-                    </>
-                  ) : (
-                    <>
-                      <Send size={16} aria-hidden="true" />
-                      Send Question
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </section>
+          <LectureQA
+            conversation={conversation}
+            historyLoading={historyLoading}
+            historyError={historyError}
+            reloadConversation={reloadConversation}
+            question={question}
+            setQuestion={setQuestion}
+            questionSubmitting={questionSubmitting}
+            questionError={questionError}
+            setQuestionError={setQuestionError}
+            submitQuestion={submitQuestion}
+            questionInputRef={questionInputRef}
+            onSuggestionSelect={jumpToQuestion}
+            placeholder="Type your question about this lecture..."
+            emptyText="No questions asked yet. Ask about definitions, formulas, derivations, or confusing concepts!"
+            hintText="Answers grounded in lecture notes"
+          />
         </>
       )}
 

@@ -7,9 +7,10 @@ import {
   CircleX,
   ChevronLeft,
   ChevronRight,
-  Sparkles,
-  ArrowRight
+  Sparkles
 } from "lucide-react";
+import LectureSelector from "../shared/LectureSelector";
+import { isLectureReady } from "../../utils/lectureUtils";
 
 export default function QuizView({
   quiz,
@@ -36,120 +37,33 @@ export default function QuizView({
   const currentQuizAnswer = quizAnswers[quizQuestionIndex];
 
   if (!quizLoading && !quiz && !quizError) {
-    const readyLectures = lectures.filter(
-      (lec) => lec.has_notes || lec.status === "completed"
-    );
+    const goDashboard = () => {
+      resetWorkspace?.();
+      setView("dashboard");
+    };
 
     return (
-      <section className="quiz-page" aria-label="Lecture Quiz Selection">
-        <button
-          type="button"
-          className="back-btn"
-          onClick={() => {
-            if (resetWorkspace) resetWorkspace();
-            setView("dashboard");
-          }}
-        >
-          <ArrowLeft size={16} aria-hidden="true" />
-          Back to Dashboard
-        </button>
-
-        <div className="quiz-selector-card">
-          <div className="selector-icon-badge">
-            <Brain size={28} />
-          </div>
-          <h2>Select a Lecture to Test Your Knowledge</h2>
-          <p>
-            Choose a synthesized lecture below. Our AI will automatically generate an active recall quiz to test your comprehension and retention.
-          </p>
-
-          {readyLectures.length > 0 ? (
-            <>
-              <div className="selector-dropdown-row">
-                <label htmlFor="quiz-lecture-select" className="selector-dropdown-label">
-                  Quick Select Lecture:
-                </label>
-                <select
-                  id="quiz-lecture-select"
-                  className="selector-dropdown-input"
-                  defaultValue=""
-                  onChange={(e) => {
-                    const selected = readyLectures.find((l) => String(l.id) === e.target.value);
-                    if (selected && generateAndOpenQuiz) {
-                      generateAndOpenQuiz(selected);
-                    }
-                  }}
-                >
-                  <option value="" disabled>Choose a synthesized lecture to quiz...</option>
-                  {readyLectures.map((lec) => (
-                    <option key={lec.id} value={lec.id}>
-                      {lec.title} ({lec.audio_format || "Ready"})
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="lecture-selector-grid">
-                {readyLectures.map((lec) => (
-                  <button
-                    key={lec.id}
-                    type="button"
-                    className="lecture-select-item"
-                    onClick={() => {
-                      if (generateAndOpenQuiz) {
-                        generateAndOpenQuiz(lec);
-                      } else if (openSavedNote) {
-                        openSavedNote(lec);
-                      }
-                    }}
-                  >
-                    <div className="item-icon-wrapper secondary">
-                      <Brain size={20} />
-                    </div>
-                    <div className="item-info">
-                      <span className="item-title">{lec.title}</span>
-                      <span className="item-meta">
-                        {lec.audio_format || "Lecture Audio"} • {lec.created_at ? new Date(lec.created_at).toLocaleDateString() : "Ready"}
-                      </span>
-                    </div>
-                    <div className="item-arrow-action">
-                      <span>Start Quiz</span>
-                      <ArrowRight size={16} />
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              <div className="selector-footer-action">
-                <button
-                  type="button"
-                  className="btn-secondary-link"
-                  onClick={() => {
-                    if (resetWorkspace) resetWorkspace();
-                    setView("dashboard");
-                  }}
-                >
-                  <Sparkles size={14} /> Or Ingest a New Lecture
-                </button>
-              </div>
-            </>
-          ) : (
-            <div className="selector-empty-cta">
-              <p>No synthesized lectures available to quiz yet.</p>
-              <button
-                type="button"
-                className="stitch-primary-btn"
-                onClick={() => {
-                  if (resetWorkspace) resetWorkspace();
-                  setView("dashboard");
-                }}
-              >
-                <Sparkles size={16} /> Go to Ingestion Studio
-              </button>
-            </div>
-          )}
-        </div>
-      </section>
+      <LectureSelector
+        ariaLabel="Lecture Quiz Selection"
+        sectionClassName="quiz-page"
+        cardClassName="quiz-selector-card"
+        icon={<Brain size={28} />}
+        itemIcon={<Brain size={20} />}
+        secondaryIcon
+        title="Select a Lecture to Test Your Knowledge"
+        description="Choose a synthesized lecture below. Our AI will automatically generate an active recall quiz to test your comprehension and retention."
+        selectId="quiz-lecture-select"
+        dropdownPlaceholder="Choose a synthesized lecture to quiz..."
+        emptyMessage="No synthesized lectures available to quiz yet."
+        actionLabel="Start Quiz"
+        readyLectures={lectures.filter(isLectureReady)}
+        onSelectLecture={(lec) => {
+          if (generateAndOpenQuiz) generateAndOpenQuiz(lec);
+          else if (openSavedNote) openSavedNote(lec);
+        }}
+        onBack={goDashboard}
+        onGoDashboard={goDashboard}
+      />
     );
   }
 
@@ -236,8 +150,8 @@ export default function QuizView({
                   {getQuizScore() === quizQuestions.length
                     ? "Outstanding mastery! You got every question correct."
                     : getQuizScore() >= Math.ceil(quizQuestions.length * 0.7)
-                    ? "Great performance! Review the explanations below to solidify difficult areas."
-                    : "Keep practicing! Review the detailed rationales below to master the concepts."}
+                      ? "Great performance! Review the explanations below to solidify difficult areas."
+                      : "Keep practicing! Review the detailed rationales below to master the concepts."}
                 </p>
               </div>
             </div>
@@ -257,9 +171,8 @@ export default function QuizView({
                     key={`review-${index}`}
                   >
                     <div
-                      className={`quiz-review-status${
-                        correct ? " is-correct" : " is-incorrect"
-                      }`}
+                      className={`quiz-review-status${correct ? " is-correct" : " is-incorrect"
+                        }`}
                     >
                       {correct ? (
                         <CircleCheck size={16} aria-hidden="true" />
@@ -339,9 +252,8 @@ export default function QuizView({
               className="quiz-progress"
               value={quizQuestionIndex + 1}
               max={quizQuestions.length}
-              aria-label={`Question ${quizQuestionIndex + 1} of ${
-                quizQuestions.length
-              }`}
+              aria-label={`Question ${quizQuestionIndex + 1} of ${quizQuestions.length
+                }`}
             />
 
             <article
@@ -364,9 +276,8 @@ export default function QuizView({
               >
                 {["A", "B", "C", "D"].map((option) => (
                   <label
-                    className={`quiz-option${
-                      currentQuizAnswer === option ? " is-selected" : ""
-                    }`}
+                    className={`quiz-option${currentQuizAnswer === option ? " is-selected" : ""
+                      }`}
                     key={option}
                   >
                     <input

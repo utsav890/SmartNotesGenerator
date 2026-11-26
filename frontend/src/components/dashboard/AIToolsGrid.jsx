@@ -5,6 +5,7 @@ import {
   Layers,
   ArrowRight
 } from "lucide-react";
+import { isLectureReady } from "../../utils/lectureUtils";
 
 export default function AIToolsGrid({
   notes,
@@ -18,15 +19,11 @@ export default function AIToolsGrid({
   setView,
   selectedLecture,
 }) {
-  const readyLectures = lectures.filter(
-    (l) => l.status === "completed" || l.has_notes
-  );
+  const readyLectures = lectures.filter(isLectureReady);
   const latestReadyLecture = readyLectures[0] || null;
-  const activeReadyLecture =
-    selectedLecture &&
-    (selectedLecture.status === "completed" || selectedLecture.has_notes)
-      ? selectedLecture
-      : latestReadyLecture;
+  const activeReadyLecture = isLectureReady(selectedLecture)
+    ? selectedLecture
+    : latestReadyLecture;
 
   return (
     <section className="stitch-tools-section" aria-label="AI Study Tools">

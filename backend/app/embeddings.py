@@ -15,23 +15,7 @@ def get_embedding_model():
     return _model
 
 
-def generate_embedding(text: str):
-    model = get_embedding_model()
-
-    embedding = model.encode(
-        text,
-        normalize_embeddings=True
-    )
-
-    return embedding.tolist()
-
-
 def generate_embeddings(texts: list[str]):
     model = get_embedding_model()
-
-    embeddings = model.encode(
-        texts,
-        normalize_embeddings=True
-    )
-
+    embeddings = model.encode(texts, normalize_embeddings=True)
     return embeddings.tolist()

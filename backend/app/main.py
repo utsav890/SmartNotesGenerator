@@ -457,13 +457,9 @@ def validate_audio_magic_bytes(contents: bytes, extension: str) -> bool:
     elif ext == ".aac":
         return contents[:2] == b"\xff\xf1" or contents[:2] == b"\xff\xf9"
     return False
-    return True
 
 
-# --------------------------------------------------
-# REQUEST MODELS
-# --------------------------------------------------
-
+# Request Models
 class LectureRequest(BaseModel):
     title: str
 
@@ -476,38 +472,11 @@ class LectureQuestionRequest(BaseModel):
     question: str = Field(min_length=1, max_length=4000)
 
 
-def get_or_create_default_user(db: Session):
-    existing_user = db.execute(
-        text("SELECT id FROM users ORDER BY id LIMIT 1")
-    ).scalar()
-
-    if existing_user is not None:
-        return existing_user
-
-    db.execute(
-        text(
-            "INSERT INTO users (full_name, email, password_hash) "
-            "VALUES (:full_name, :email, :password_hash)"
-        ),
-        {
-            "full_name": "System User",
-            "email": "system@smartnotes.local",
-            "password_hash": "system-user"
-        }
-    )
-    db.commit()
-
-    return db.execute(text("SELECT LAST_INSERT_ID()" )).scalar()
-
-
 def get_user_lecture(lecture_id: int, user: User, db: Session) -> Lecture:
     """Validate that lecture exists and belongs to the authenticated user."""
     lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
     if not lecture:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Lecture not found"
-        )
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Lecture not found")
     if lecture.user_id != user.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -516,64 +485,132 @@ def get_user_lecture(lecture_id: int, user: User, db: Session) -> Lecture:
     return lecture
 
 
-# --------------------------------------------------
-# ROOT / SPA / HEALTH CHECK ENDPOINTS
-# --------------------------------------------------
+def _get_latest_note(db: Session, lecture_id: int) -> Optional[Note]:
+    return (
+        db.query(Note)
+        .filter(Note.lecture_id == lecture_id)
+        .order_by(Note.version.desc(), Note.id.desc())
+        .first()
+    )
 
+
+def _mark_lecture_failed(lecture_id: int, error_message: str) -> None:
+    """Persist failed lecture status in an isolated session after rollback."""
+    try:
+        with SessionLocal() as err_db:
+            lec = err_db.query(Lecture).filter(Lecture.id == lecture_id).first()
+            if lec:
+                lec.status = "failed"
+                lec.error_message = error_message
+                err_db.commit()
+    except Exception as update_err:
+        logger.error("Could not record failed status for lecture %d: %s", lecture_id, update_err)
+
+
+def _combine_segment_notes(title: str, pipeline_result: dict) -> dict:
+    """Merge multi-segment P_119 note outputs while deduplicating glossary terms and questions."""
+    generated = {
+        "title": title,
+        "summary": "",
+        "sections": [],
+        "key_points": [],
+        "glossary": [],
+        "revision_questions": [],
+        "pipeline": {
+            "segments": pipeline_result.get("segments", []),
+            "coverage": pipeline_result.get("coverage", {}),
+        },
+    }
+    seen_glossary_terms: set[str] = set()
+    seen_questions: set[str] = set()
+
+    for item in pipeline_result.get("notes", []):
+        notes = item.get("notes", {})
+        if not isinstance(notes, dict):
+            continue
+        if not generated["summary"]:
+            generated["summary"] = notes.get("summary", "")
+        if isinstance(notes.get("sections"), list):
+            generated["sections"].extend(notes["sections"])
+        if isinstance(notes.get("key_points"), list):
+            generated["key_points"].extend(notes["key_points"])
+
+        for glossary_item in notes.get("glossary", []) if isinstance(notes.get("glossary"), list) else []:
+            if not isinstance(glossary_item, dict):
+                continue
+            term = str(glossary_item.get("term", "")).strip()
+            if term and term.lower() not in seen_glossary_terms:
+                generated["glossary"].append(glossary_item)
+                seen_glossary_terms.add(term.lower())
+
+        for q_item in notes.get("revision_questions", []) if isinstance(notes.get("revision_questions"), list) else []:
+            if isinstance(q_item, dict):
+                qt = str(q_item.get("question", "")).strip()
+                if qt and qt.lower() not in seen_questions:
+                    generated["revision_questions"].append(q_item)
+                    seen_questions.add(qt.lower())
+            else:
+                qt = str(q_item).strip()
+                if qt and qt.lower() not in seen_questions:
+                    generated["revision_questions"].append({
+                        "question": qt,
+                        "answer": "Refer to the comprehensive lecture notes above for the detailed explanation and analysis.",
+                    })
+                    seen_questions.add(qt.lower())
+
+    return generated
+
+
+def _save_generated_notes(db: Session, lecture: Lecture, transcript_text: str) -> tuple[dict, Note]:
+    """Run P_119 synthesis on transcript_text and persist a versioned Note record."""
+    result = process_transcript(transcript_text, lecture_id=lecture.id)
+    generated = _combine_segment_notes(lecture.title, result)
+    latest_note = _get_latest_note(db, lecture.id)
+    note = Note(
+        lecture_id=lecture.id,
+        title=generated["title"],
+        summary=generated["summary"],
+        content=generated,
+        version=(latest_note.version + 1) if latest_note else 1,
+    )
+    db.add(note)
+    setattr(lecture, "status", "completed")
+    setattr(lecture, "error_message", None)
+    db.commit()
+    db.refresh(note)
+    return generated, note
+
+
+# Root, Health & Monitoring Endpoints
 @app.get("/", include_in_schema=False)
 def home():
     if STATIC_DIR and (STATIC_DIR / "index.html").is_file():
         return FileResponse(STATIC_DIR / "index.html")
-    return {
-        "message": "Smart Notes Generator API is running"
-    }
+    return {"message": "Smart Notes Generator API is running"}
 
-
-# --------------------------------------------------
-# SYSTEM HEALTH & MONITORING ENDPOINTS
-# --------------------------------------------------
 
 @app.get("/health")
 @app.get("/api/health")
-def health_check(
-    db: Session = Depends(get_db)
-):
+def health_check(db: Session = Depends(get_db)):
     """Minimal health check endpoint verifying database connectivity without leaking schemas or credentials."""
     try:
         db.execute(text("SELECT 1"))
-        return {
-            "status": "healthy",
-            "service": "smartnotes-api"
-        }
+        return {"status": "healthy", "service": "smartnotes-api"}
     except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database service unavailable"
-        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database service unavailable")
 
 
 @app.get("/db-test")
-def test_database(
-    admin: User = Depends(require_admin),
-    db: Session = Depends(get_db)
-):
+def test_database(admin: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Protected administrator database connection probe."""
     try:
         db.execute(text("SELECT 1"))
-        return {
-            "status": "connected"
-        }
+        return {"status": "connected"}
     except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Database connection failure"
-        )
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database connection failure")
 
 
-# --------------------------------------------------
-# CREATE LECTURE
-# --------------------------------------------------
-
+# Lectures, Audio Upload & Transcription
 @app.post("/lectures")
 def create_lecture(
     request: LectureRequest,
@@ -581,10 +618,7 @@ def create_lecture(
     db: Session = Depends(get_db)
 ):
     if not request.title.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Lecture title cannot be empty"
-        )
+        raise HTTPException(status_code=400, detail="Lecture title cannot be empty")
 
     lecture = Lecture(
         user_id=current_user.id,
@@ -594,32 +628,16 @@ def create_lecture(
         file_size=0,
         status="uploaded"
     )
-
     try:
         db.add(lecture)
         db.commit()
         db.refresh(lecture)
-
-        return {
-            "message": "Lecture created successfully",
-            "lecture_id": lecture.id,
-            "title": lecture.title
-        }
-
+        return {"message": "Lecture created successfully", "lecture_id": lecture.id, "title": lecture.title}
     except Exception as error:
         db.rollback()
+        logger.exception("Lecture creation error: %s", error)
+        raise HTTPException(status_code=500, detail="Failed to create lecture")
 
-        print("Lecture creation error:", error)
-
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to create lecture"
-        )
-
-
-# --------------------------------------------------
-# UPLOAD AUDIO
-# --------------------------------------------------
 
 @app.post("/upload-audio")
 async def upload_audio(
@@ -629,54 +647,30 @@ async def upload_audio(
     db: Session = Depends(get_db)
 ):
     check_rate_limit(request)
-
     if not file.filename:
-        raise HTTPException(
-            status_code=400,
-            detail="No file selected"
-        )
+        raise HTTPException(status_code=400, detail="No file selected")
 
     original_name = Path(file.filename).name
     extension = Path(original_name).suffix.lower()
-
-    # Validate audio format
     if extension not in ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail="Unsupported audio format"
-        )
+        raise HTTPException(status_code=400, detail="Unsupported audio format")
 
-    # Read uploaded file
     contents = await file.read()
-
     if not contents:
-        raise HTTPException(
-            status_code=400,
-            detail="The uploaded file is empty"
-        )
-
+        raise HTTPException(status_code=400, detail="The uploaded file is empty")
     if len(contents) > MAX_FILE_SIZE:
-        raise HTTPException(
-            status_code=413,
-            detail="File size must not exceed 50 MB"
-        )
-
+        raise HTTPException(status_code=413, detail="File size must not exceed 50 MB")
     if not validate_audio_magic_bytes(contents, extension):
         raise HTTPException(
             status_code=400,
             detail="File content does not match the audio format extension. Disguised files are rejected."
         )
 
-    # Generate unique filename
     saved_filename = f"{uuid4().hex}{extension}"
-
     file_path = UPLOAD_DIR / saved_filename
 
     try:
-        # Save audio file
         file_path.write_bytes(contents)
-
-        # Create lecture record in MySQL for authenticated user
         lecture = Lecture(
             user_id=current_user.id,
             title=Path(original_name).stem,
@@ -685,11 +679,9 @@ async def upload_audio(
             file_size=len(contents),
             status="uploaded"
         )
-
         db.add(lecture)
         db.commit()
         db.refresh(lecture)
-
         return {
             "message": "Audio uploaded successfully",
             "lecture_id": lecture.id,
@@ -698,28 +690,15 @@ async def upload_audio(
             "file_size_bytes": len(contents),
             "status": lecture.status
         }
-
     except Exception as error:
         db.rollback()
-
-        # Remove uploaded file if saving to database fails
         if file_path.exists():
             file_path.unlink()
-
-        print("Upload error:", error)
-
-        raise HTTPException(
-            status_code=500,
-            detail="Failed to upload and save lecture"
-        )
-
+        logger.exception("Upload error: %s", error)
+        raise HTTPException(status_code=500, detail="Failed to upload and save lecture")
     finally:
         await file.close()
 
-
-# --------------------------------------------------
-# TRANSCRIBE AUDIO AND SAVE TRANSCRIPT
-# --------------------------------------------------
 
 @app.post("/transcribe/{filename}")
 def transcribe_lecture(
@@ -731,120 +710,55 @@ def transcribe_lecture(
     check_rate_limit(request)
     request_started_at = time.perf_counter()
 
-    # Prevent directory traversal
-    safe_filename = Path(filename).name
+    if Path(filename).name != filename:
+        raise HTTPException(status_code=400, detail="Invalid filename")
 
-    if safe_filename != filename:
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid filename"
-        )
-
-    file_path = UPLOAD_DIR / safe_filename
-
+    file_path = UPLOAD_DIR / filename
     if not file_path.is_file():
-        raise HTTPException(
-            status_code=404,
-            detail="Audio file not found"
-        )
+        raise HTTPException(status_code=404, detail="Audio file not found")
 
-    # Find lecture associated with audio
-    lecture = db.query(Lecture).filter(
-        Lecture.audio_path == str(file_path)
-    ).first()
-
+    lecture = db.query(Lecture).filter(Lecture.audio_path == str(file_path)).first()
     if not lecture:
-        raise HTTPException(
-            status_code=404,
-            detail="Lecture record not found"
-        )
-
+        raise HTTPException(status_code=404, detail="Lecture record not found")
     if lecture.user_id != current_user.id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="You do not have permission to access this lecture."
-        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You do not have permission to access this lecture.")
 
-    # Set status to processing before starting transcription
     setattr(lecture, "status", "processing")
     setattr(lecture, "error_message", None)
     db.commit()
 
     try:
-        # Run Whisper transcription
         result = transcribe_audio(str(file_path))
-
         transcript_text = result["transcript"]
         language = result.get("language")
-
         if not transcript_text.strip():
-            raise HTTPException(
-                status_code=422,
-                detail="No speech detected in audio"
-            )
+            raise HTTPException(status_code=422, detail="No speech detected in audio")
 
-        # Check if transcript already exists
-        transcript_record = db.query(Transcript).filter(
-            Transcript.lecture_id == lecture.id
-        ).first()
-
+        transcript_record = db.query(Transcript).filter(Transcript.lecture_id == lecture.id).first()
         if transcript_record:
             transcript_record.transcript_text = transcript_text
             setattr(transcript_record, "language", language)
-
         else:
-            transcript_record = Transcript(
-                lecture_id=lecture.id,
-                transcript_text=transcript_text,
-                language=language
-            )
-
-            db.add(transcript_record)
+            db.add(Transcript(lecture_id=lecture.id, transcript_text=transcript_text, language=language))
 
         setattr(lecture, "status", "transcribed")
         setattr(lecture, "error_message", None)
-
         db.commit()
 
-        logger.info(
-            "Transcription request completed for lecture_id=%s in %.2f seconds",
-            lecture.id,
-            time.perf_counter() - request_started_at
-        )
-
+        logger.info("Transcription request completed for lecture_id=%s in %.2f seconds", lecture.id, time.perf_counter() - request_started_at)
         return {
             "message": "Transcription completed and saved",
             "lecture_id": lecture.id,
             "language": language,
             "transcript": transcript_text
         }
-
     except HTTPException as http_exc:
         db.rollback()
-        try:
-            with SessionLocal() as err_db:
-                err_lec = err_db.query(Lecture).filter(Lecture.id == lecture.id).first()
-                if err_lec:
-                    err_lec.status = "failed"
-                    err_lec.error_message = str(http_exc.detail)
-                    err_db.commit()
-        except Exception:
-            pass
+        _mark_lecture_failed(lecture.id, str(http_exc.detail))
         raise
-
     except Exception as error:
         db.rollback()
-        err_msg = str(error)
-        try:
-            with SessionLocal() as err_db:
-                err_lec = err_db.query(Lecture).filter(Lecture.id == lecture.id).first()
-                if err_lec:
-                    err_lec.status = "failed"
-                    err_lec.error_message = err_msg
-                    err_db.commit()
-        except Exception:
-            pass
-
+        _mark_lecture_failed(lecture.id, str(error))
         logger.error(
             "Transcription request failed for lecture_id=%s after %.2f seconds: %s\n%s",
             lecture.id,
@@ -852,17 +766,8 @@ def transcribe_lecture(
             error,
             traceback.format_exc()
         )
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {error}")
 
-        raise HTTPException(
-            status_code=500,
-            detail=f"Transcription failed: {error}"
-        )
-
-
-# --------------------------------------------------
-# GENERATE NOTES FROM PASTED TRANSCRIPT
-# Does not save notes to MySQL
-# --------------------------------------------------
 
 @app.post("/generate-notes")
 def create_notes(
@@ -873,83 +778,41 @@ def create_notes(
 ):
     check_rate_limit(request)
     if not notes_request.transcript.strip():
-        raise HTTPException(
-            status_code=400,
-            detail="Transcript cannot be empty"
-        )
+        raise HTTPException(status_code=400, detail="Transcript cannot be empty")
 
     try:
-        notes = generate_notes(
-            notes_request.transcript
-        )
-
+        notes = generate_notes(notes_request.transcript)
         lecture_id = None
         note_id = None
 
         if current_user:
             try:
-                lecture_title = notes.get("title", "Lecture Notes")
-                if not lecture_title or not str(lecture_title).strip():
-                    lecture_title = "Pasted Lecture Notes"
-
-                lecture = Lecture(
-                    user_id=current_user.id,
-                    title=str(lecture_title).strip()[:255],
-                    status="completed"
-                )
+                raw_title = notes.get("title", "Lecture Notes")
+                title = str(raw_title).strip()[:255] if raw_title and str(raw_title).strip() else "Pasted Lecture Notes"
+                lecture = Lecture(user_id=current_user.id, title=title, status="completed")
                 db.add(lecture)
                 db.flush()
-
-                transcript_record = Transcript(
-                    lecture_id=lecture.id,
-                    transcript_text=notes_request.transcript
-                )
-                db.add(transcript_record)
-
-                note = Note(
-                    lecture_id=lecture.id,
-                    title=str(lecture_title).strip()[:255],
-                    summary=notes.get("summary", ""),
-                    content=notes,
-                    version=1
-                )
+                db.add(Transcript(lecture_id=lecture.id, transcript_text=notes_request.transcript))
+                note = Note(lecture_id=lecture.id, title=title, summary=notes.get("summary", ""), content=notes, version=1)
                 db.add(note)
                 db.commit()
                 db.refresh(lecture)
                 db.refresh(note)
-                lecture_id = lecture.id
-                note_id = note.id
+                lecture_id, note_id = lecture.id, note.id
             except Exception as save_err:
                 db.rollback()
                 logger.warning(f"Could not persist pasted notes to database: {save_err}")
 
-        return {
-            "message": "Notes generated successfully",
-            "notes": notes,
-            "lecture_id": lecture_id,
-            "note_id": note_id
-        }
-
+        return {"message": "Notes generated successfully", "notes": notes, "lecture_id": lecture_id, "note_id": note_id}
     except ValueError as error:
-        raise HTTPException(
-            status_code=400,
-            detail=str(error)
-        )
-
+        raise HTTPException(status_code=400, detail=str(error))
     except Exception as error:
-        print("AI note generation error:", error)
-
-        raise HTTPException(
-            status_code=502,
-            detail="AI note generation failed. Check backend terminal."
-        )
+        logger.exception("AI note generation error: %s", error)
+        raise HTTPException(status_code=502, detail="AI note generation failed. Check backend terminal.")
 
 
 def run_lecture_synthesis(lecture_id: int, user_id: int):
-    """
-    Unified, robust background synthesis worker:
-    Whisper transcription -> Groq LLM structured notes & quiz -> Qdrant indexing -> MySQL persistence.
-    """
+    """Unified background synthesis worker: transcription -> note generation -> Qdrant indexing -> DB persistence."""
     logger.info("Beginning synthesis worker for lecture_id=%d (user_id=%d)...", lecture_id, user_id)
     with SessionLocal() as db:
         lecture = db.query(Lecture).filter(Lecture.id == lecture_id).first()
@@ -962,7 +825,6 @@ def run_lecture_synthesis(lecture_id: int, user_id: int):
         db.commit()
 
         try:
-            # Stage 1: Transcription
             transcript_record = db.query(Transcript).filter(Transcript.lecture_id == lecture_id).first()
             if not transcript_record or not transcript_record.transcript_text or not str(transcript_record.transcript_text).strip():
                 if not lecture.audio_path or not Path(lecture.audio_path).is_file():
@@ -975,108 +837,21 @@ def run_lecture_synthesis(lecture_id: int, user_id: int):
                     raise ValueError("No speech detected in audio file.")
 
                 if not transcript_record:
-                    transcript_record = Transcript(
-                        lecture_id=lecture_id,
-                        transcript_text=transcript_text,
-                        language=trans_result.get("language")
-                    )
+                    transcript_record = Transcript(lecture_id=lecture_id, transcript_text=transcript_text, language=trans_result.get("language"))
                     db.add(transcript_record)
                 else:
                     transcript_record.transcript_text = transcript_text
                     transcript_record.language = trans_result.get("language")
                 db.commit()
 
-            # Stage 2: Groq LLM Structured Note Generation & Qdrant Chunks
-            logger.info("Stage 2/3: Generating structured notes and indexing chunks via process_transcript...")
-            result = process_transcript(str(transcript_record.transcript_text), lecture_id=lecture_id)
-            generated_notes = result["notes"]
-
-            generated = {
-                "title": lecture.title,
-                "summary": "",
-                "sections": [],
-                "key_points": [],
-                "glossary": [],
-                "revision_questions": [],
-                "pipeline": {
-                    "segments": result.get("segments", []),
-                    "coverage": result.get("coverage", {})
-                }
-            }
-            seen_glossary_terms = set()
-            seen_questions = set()
-
-            for item in generated_notes:
-                notes = item.get("notes", {})
-                if not isinstance(notes, dict):
-                    continue
-                if not generated["summary"]:
-                    generated["summary"] = notes.get("summary", "")
-                sections = notes.get("sections", [])
-                if isinstance(sections, list):
-                    generated["sections"].extend(sections)
-                key_points = notes.get("key_points", [])
-                if isinstance(key_points, list):
-                    generated["key_points"].extend(key_points)
-                for g in notes.get("glossary", []):
-                    if isinstance(g, dict):
-                        t = str(g.get("term", "")).strip()
-                        if t and t.lower() not in seen_glossary_terms:
-                            generated["glossary"].append(g)
-                            seen_glossary_terms.add(t.lower())
-                for q in notes.get("revision_questions", []):
-                    if isinstance(q, dict):
-                        qt = str(q.get("question", "")).strip()
-                        if qt and qt.lower() not in seen_questions:
-                            generated["revision_questions"].append(q)
-                            seen_questions.add(qt.lower())
-                    elif isinstance(q, str) and q.strip() and q.strip().lower() not in seen_questions:
-                        generated["revision_questions"].append({
-                            "question": q.strip(),
-                            "answer": "Refer to the comprehensive lecture notes above for the detailed explanation and analysis."
-                        })
-                        seen_questions.add(q.strip().lower())
-
-            # Stage 3: MySQL Note Persistence
-            logger.info("Stage 3/3: Persisting note to database...")
-            latest_note = db.query(Note).filter(Note.lecture_id == lecture_id).order_by(Note.version.desc()).first()
-            note = Note(
-                lecture_id=lecture_id,
-                title=generated["title"],
-                summary=generated["summary"],
-                content=generated,
-                version=(latest_note.version + 1) if latest_note else 1
-            )
-            db.add(note)
-            setattr(lecture, "status", "completed")
-            setattr(lecture, "error_message", None)
-            db.commit()
+            logger.info("Stage 2/3: Running structured note generation and Qdrant indexing...")
+            _save_generated_notes(db, lecture, str(transcript_record.transcript_text))
             logger.info("Successfully completed synthesis pipeline for lecture %d.", lecture_id)
-
         except Exception as exc:
             db.rollback()
-            err_msg = str(exc)
-            logger.error(
-                "Synthesis pipeline failed for lecture %d: %s\n%s",
-                lecture_id,
-                err_msg,
-                traceback.format_exc()
-            )
-            try:
-                with SessionLocal() as err_db:
-                    lec = err_db.query(Lecture).filter(Lecture.id == lecture_id).first()
-                    if lec:
-                        lec.status = "failed"
-                        lec.error_message = err_msg
-                        err_db.commit()
-            except Exception as update_err:
-                logger.error("Could not record failed status for lecture %d: %s", lecture_id, update_err)
+            logger.error("Synthesis pipeline failed for lecture %d: %s\n%s", lecture_id, exc, traceback.format_exc())
+            _mark_lecture_failed(lecture_id, str(exc))
 
-
-# --------------------------------------------------
-# GENERATE NOTES FROM SAVED TRANSCRIPT
-# AND SAVE NOTES TO MYSQL
-# --------------------------------------------------
 
 @app.post("/lectures/{lecture_id}/generate-notes")
 def create_and_save_notes(
@@ -1086,206 +861,33 @@ def create_and_save_notes(
     db: Session = Depends(get_db)
 ):
     check_rate_limit(request)
-
-    # Find and verify lecture ownership
     lecture = get_user_lecture(lecture_id, current_user, db)
 
-    # Set status to processing immediately
     setattr(lecture, "status", "processing")
     setattr(lecture, "error_message", None)
     db.commit()
 
-    # Find saved transcript
-    transcript_record = db.query(Transcript).filter(
-        Transcript.lecture_id == lecture_id
-    ).first()
-
+    transcript_record = db.query(Transcript).filter(Transcript.lecture_id == lecture_id).first()
     if not transcript_record:
+        msg = "Transcript not found. Transcribe lecture first."
         setattr(lecture, "status", "failed")
-        setattr(lecture, "error_message", "Transcript not found. Transcribe lecture first.")
+        setattr(lecture, "error_message", msg)
         db.commit()
-        raise HTTPException(
-            status_code=404,
-            detail="Transcript not found. Transcribe lecture first."
-        )
+        raise HTTPException(status_code=404, detail=msg)
 
     try:
-
-        # --------------------------------------------------
-        # P_119 PIPELINE
-        # --------------------------------------------------
-
-        result = process_transcript(
-            str(transcript_record.transcript_text),
-            lecture_id=lecture_id
-        )
-
-        generated_notes = result["notes"]
-
-        # Final P_119 output
-        generated = {
-            "title": lecture.title,
-            "summary": "",
-            "sections": [],
-            "key_points": [],
-            "glossary": [],
-            "revision_questions": [],
-            "pipeline": {
-                "segments": result["segments"],
-                "coverage": result["coverage"]
-            }
-        }
-
-        # Prevent duplicate glossary terms/questions
-        seen_glossary_terms = set()
-        seen_questions = set()
-
-        # --------------------------------------------------
-        # COMBINE NOTES FROM ALL SEGMENTS
-        # --------------------------------------------------
-
-        for item in generated_notes:
-
-            notes = item.get("notes", {})
-
-            if not isinstance(notes, dict):
-                continue
-
-            # Summary
-            if not generated["summary"]:
-                generated["summary"] = notes.get(
-                    "summary",
-                    ""
-                )
-
-            # Sections
-            sections = notes.get("sections", [])
-
-            if isinstance(sections, list):
-                generated["sections"].extend(sections)
-
-            # Key points
-            key_points = notes.get("key_points", [])
-
-            if isinstance(key_points, list):
-                generated["key_points"].extend(key_points)
-
-            # Glossary
-            glossary = notes.get("glossary", [])
-
-            if isinstance(glossary, list):
-
-                for glossary_item in glossary:
-
-                    if not isinstance(glossary_item, dict):
-                        continue
-
-                    term = str(
-                        glossary_item.get("term", "")
-                    ).strip()
-
-                    if not term:
-                        continue
-
-                    term_key = term.lower()
-
-                    if term_key not in seen_glossary_terms:
-                        generated["glossary"].append(
-                            glossary_item
-                        )
-
-                        seen_glossary_terms.add(
-                            term_key
-                        )
-
-            # Revision questions
-            questions = notes.get(
-                "revision_questions",
-                []
-            )
-
-            if isinstance(questions, list):
-
-                for question_item in questions:
-                    if isinstance(question_item, dict):
-                        q_text = str(question_item.get("question", "")).strip()
-                        if not q_text:
-                            continue
-                        q_key = q_text.lower()
-                        if q_key not in seen_questions:
-                            generated["revision_questions"].append(question_item)
-                            seen_questions.add(q_key)
-                    else:
-                        question = str(question_item).strip()
-                        if not question:
-                            continue
-                        question_key = question.lower()
-                        if question_key not in seen_questions:
-                            generated["revision_questions"].append({
-                                "question": question,
-                                "answer": "Refer to the comprehensive lecture notes above for the detailed explanation and analysis."
-                            })
-                            seen_questions.add(question_key)
-
-        # --------------------------------------------------
-        # SAVE TO MYSQL
-        # --------------------------------------------------
-
-        latest_note = db.query(Note).filter(
-            Note.lecture_id == lecture_id
-        ).order_by(
-            Note.version.desc()
-        ).first()
-
-        note = Note(
-            lecture_id=lecture_id,
-            title=generated["title"],
-            summary=generated["summary"],
-            content=generated,
-            version=(latest_note.version + 1)
-                if latest_note else 1
-        )
-
-        db.add(note)
-
-        setattr(lecture, "status", "completed")
-        setattr(lecture, "error_message", None)
-
-        db.commit()
-        db.refresh(note)
-
+        generated, note = _save_generated_notes(db, lecture, str(transcript_record.transcript_text))
         return {
             "message": "Notes generated and saved successfully",
             "lecture_id": lecture_id,
             "note_id": note.id,
             "notes": generated
         }
-
     except Exception as error:
-
         db.rollback()
-        err_str = str(error)
-        try:
-            with SessionLocal() as err_db:
-                err_lec = err_db.query(Lecture).filter(Lecture.id == lecture_id).first()
-                if err_lec:
-                    err_lec.status = "failed"
-                    err_lec.error_message = err_str
-                    err_db.commit()
-        except Exception:
-            pass
-
-        logger.error(
-            "Note generation error for lecture_id=%d: %s\n%s",
-            lecture_id,
-            error,
-            traceback.format_exc()
-        )
-
-        raise HTTPException(
-            status_code=502,
-            detail=f"Note generation failed: {error}"
-        )
+        _mark_lecture_failed(lecture_id, str(error))
+        logger.error("Note generation error for lecture_id=%d: %s\n%s", lecture_id, error, traceback.format_exc())
+        raise HTTPException(status_code=502, detail=f"Note generation failed: {error}")
 
 
 # --------------------------------------------------
@@ -1517,240 +1119,78 @@ def ask_lecture_question(
     db: Session = Depends(get_db)
 ):
     check_rate_limit(http_request)
-    # --------------------------------------------------
-    # FIND LECTURE & VERIFY OWNERSHIP
-    # --------------------------------------------------
+    get_user_lecture(lecture_id, current_user, db)
 
-    lecture = get_user_lecture(lecture_id, current_user, db)
-
-    # --------------------------------------------------
-    # FIND TRANSCRIPT
-    # --------------------------------------------------
-
-    transcript = db.query(Transcript).filter(
-        Transcript.lecture_id == lecture_id
-    ).first()
-
+    transcript = db.query(Transcript).filter(Transcript.lecture_id == lecture_id).first()
     if not transcript:
-        raise HTTPException(
-            status_code=404,
-            detail="No saved transcript is available for this lecture."
-        )
+        raise HTTPException(status_code=404, detail="No saved transcript is available for this lecture.")
 
-    transcript_text = str(
-        transcript.transcript_text or ""
-    ).strip()
-
+    transcript_text = str(transcript.transcript_text or "").strip()
     if not transcript_text:
-        raise HTTPException(
-            status_code=422,
-            detail="The saved transcript is empty."
-        )
+        raise HTTPException(status_code=422, detail="The saved transcript is empty.")
 
-    # --------------------------------------------------
-    # FIND LATEST NOTES
-    # --------------------------------------------------
-
-    latest_note = db.query(Note).filter(
-        Note.lecture_id == lecture_id
-    ).order_by(
-        Note.version.desc(),
-        Note.id.desc()
-    ).first()
-
+    latest_note = _get_latest_note(db, lecture_id)
     if not latest_note:
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Generate saved notes for this lecture "
-                "before asking questions."
-            )
-        )
-
-    # --------------------------------------------------
-    # VALIDATE QUESTION
-    # --------------------------------------------------
+        raise HTTPException(status_code=404, detail="Generate saved notes for this lecture before asking questions.")
 
     question = request.question.strip()
-
     if not question:
-        raise HTTPException(
-            status_code=422,
-            detail="Enter a question about this lecture."
-        )
+        raise HTTPException(status_code=422, detail="Enter a question about this lecture.")
 
-    # --------------------------------------------------
-    # GET CONVERSATION HISTORY
-    # --------------------------------------------------
-
-    stored_history = db.query(
-        LectureMessage
-    ).filter(
-        LectureMessage.lecture_id == lecture_id
-    ).order_by(
-        LectureMessage.id.asc()
-    ).all()
-
+    stored_history = (
+        db.query(LectureMessage)
+        .filter(LectureMessage.lecture_id == lecture_id)
+        .order_by(LectureMessage.id.asc())
+        .all()
+    )
     history = [
-        {
-            "role": str(message.role),
-            "content": str(message.content)
-        }
-        for message in stored_history
-        if message.role in {"user", "assistant"}
+        {"role": str(m.role), "content": str(m.content)}
+        for m in stored_history
+        if m.role in {"user", "assistant"}
     ]
-
-    # --------------------------------------------------
-    # PREPARE SAVED NOTES
-    # --------------------------------------------------
 
     note_content = (
         latest_note.content.strip()
         if isinstance(latest_note.content, str)
-        else json.dumps(
-            latest_note.content,
-            ensure_ascii=False
-        )
+        else json.dumps(latest_note.content, ensure_ascii=False)
     )
-
     if not note_content or note_content == "null":
-        raise HTTPException(
-            status_code=422,
-            detail="The saved notes are empty."
-        )
+        raise HTTPException(status_code=422, detail="The saved notes are empty.")
 
     try:
-
-        # --------------------------------------------------
-        # RAG RETRIEVAL (with graceful transcript fallback)
-        # --------------------------------------------------
-
         retrieved_chunks = []
         try:
-            retrieved_chunks = retrieve_context(
-                lecture_id=lecture_id,
-                query=question,
-                limit=5
-            )
+            retrieved_chunks = retrieve_context(lecture_id=lecture_id, query=question, limit=5)
         except Exception as qdrant_err:
             logger.warning("Qdrant retrieval skipped for lecture %s: %s", lecture_id, qdrant_err)
 
-        # Convert retrieved chunks into LLM context
-        context = "\n\n".join(
-            item["text"]
-            for item in retrieved_chunks
-            if item.get("text")
-        )
-
-        # --------------------------------------------------
-        # FALLBACK
-        # --------------------------------------------------
-
-        # If Qdrant does not return anything,
-        # use the transcript as fallback context.
+        context = "\n\n".join(item["text"] for item in retrieved_chunks if item.get("text"))
         if not context.strip():
             context = transcript_text
 
-        # --------------------------------------------------
-        # ASK QWEN
-        # --------------------------------------------------
-
-        result = answer_question(
-            question=question,
-            context=context,
-            notes_context=note_content,
-            history=history
-        )
-
+        result = answer_question(question=question, context=context, notes_context=note_content, history=history)
     except Exception as error:
+        logger.exception("Question generation failed for lecture %s", lecture_id)
+        raise HTTPException(status_code=502, detail="Could not generate an answer. Please try again.") from error
 
-        logger.exception(
-            "Question generation failed for lecture %s",
-            lecture_id
-        )
-
-        raise HTTPException(
-            status_code=502,
-            detail="Could not generate an answer. Please try again."
-        ) from error
-
-    # --------------------------------------------------
-    # EXTRACT ANSWER
-    # --------------------------------------------------
-
-    answer_text = result.get(
-        "answer",
-        ""
-    )
-
-    sources = result.get(
-        "sources",
-        []
-    )
-
-    confidence = result.get(
-        "confidence",
-        "medium"
-    )
-
+    answer_text = result.get("answer", "")
+    sources = result.get("sources", [])
+    confidence = result.get("confidence", "medium")
     if not answer_text:
-        raise HTTPException(
-            status_code=502,
-            detail="The AI returned an empty answer."
-        )
+        raise HTTPException(status_code=502, detail="The AI returned an empty answer.")
 
-    # --------------------------------------------------
-    # SAVE QUESTION
-    # --------------------------------------------------
-
-    question_message = LectureMessage(
-        lecture_id=lecture_id,
-        role="user",
-        content=question
-    )
-
-    # --------------------------------------------------
-    # SAVE ANSWER
-    # --------------------------------------------------
-
-    answer_message = LectureMessage(
-        lecture_id=lecture_id,
-        role="assistant",
-        content=answer_text
-    )
+    question_message = LectureMessage(lecture_id=lecture_id, role="user", content=question)
+    answer_message = LectureMessage(lecture_id=lecture_id, role="assistant", content=answer_text)
 
     try:
-
-        db.add_all([
-            question_message,
-            answer_message
-        ])
-
+        db.add_all([question_message, answer_message])
         db.commit()
-
         db.refresh(question_message)
         db.refresh(answer_message)
-
     except SQLAlchemyError as error:
-
         db.rollback()
-
-        logger.exception(
-            "Could not save question history for lecture %s",
-            lecture_id
-        )
-
-        raise HTTPException(
-            status_code=500,
-            detail=(
-                "The answer was generated but "
-                "could not be saved."
-            )
-        ) from error
-
-    # --------------------------------------------------
-    # RESPONSE
-    # --------------------------------------------------
+        logger.exception("Could not save question history for lecture %s", lecture_id)
+        raise HTTPException(status_code=500, detail="The answer was generated but could not be saved.") from error
 
     return {
         "lecture_id": lecture_id,
@@ -1759,25 +1199,12 @@ def ask_lecture_question(
         "sources": sources,
         "confidence": confidence,
         "retrieved_chunks": [
-            {
-                "text": item.get("text", ""),
-                "score": item.get("score")
-            }
+            {"text": item.get("text", ""), "score": item.get("score")}
             for item in retrieved_chunks
         ],
         "messages": [
-            {
-                "id": question_message.id,
-                "role": question_message.role,
-                "content": question_message.content,
-                "created_at": question_message.created_at
-            },
-            {
-                "id": answer_message.id,
-                "role": answer_message.role,
-                "content": answer_message.content,
-                "created_at": answer_message.created_at
-            }
+            {"id": m.id, "role": m.role, "content": m.content, "created_at": m.created_at}
+            for m in (question_message, answer_message)
         ]
     }
     
@@ -1889,78 +1316,31 @@ def create_flashcards(
     db: Session = Depends(get_db)
 ):
     check_rate_limit(request)
-    lecture = get_user_lecture(lecture_id, current_user, db)
-
-    latest_note = db.query(Note).filter(
-        Note.lecture_id == lecture_id
-    ).order_by(
-        Note.version.desc(),
-        Note.id.desc()
-    ).first()
-
+    get_user_lecture(lecture_id, current_user, db)
+    latest_note = _get_latest_note(db, lecture_id)
     if not latest_note:
-        raise HTTPException(
-            status_code=404,
-            detail="Generate notes before creating flashcards"
-        )
+        raise HTTPException(status_code=404, detail="Generate notes before creating flashcards")
 
     try:
         note_content = (
             latest_note.content
             if isinstance(latest_note.content, str)
-            else json.dumps(
-                latest_note.content,
-                ensure_ascii=False
-            )
+            else json.dumps(latest_note.content, ensure_ascii=False)
         )
-
-        generated = generate_flashcards(
-            note_content,
-            count=10
-        )
-
-        flashcards = generated.get(
-            "flashcards",
-            []
-        )
-
+        flashcards = generate_flashcards(note_content, count=10).get("flashcards", [])
         for card in flashcards:
-
             db.execute(
-                text("""
-                    INSERT INTO flashcards
-                    (lecture_id, question, answer)
-                    VALUES
-                    (:lecture_id, :question, :answer)
-                """),
-                {
-                    "lecture_id": lecture_id,
-                    "question": card["question"],
-                    "answer": card["answer"]
-                }
+                text("INSERT INTO flashcards (lecture_id, question, answer) VALUES (:lecture_id, :question, :answer)"),
+                {"lecture_id": lecture_id, "question": card["question"], "answer": card["answer"]}
             )
-
         db.commit()
-
-        return {
-            "lecture_id": lecture_id,
-            "flashcards": flashcards
-        }
-
+        return {"lecture_id": lecture_id, "flashcards": flashcards}
     except Exception as error:
-
         db.rollback()
+        logger.exception("Flashcard generation error for lecture %s: %s", lecture_id, error)
+        raise HTTPException(status_code=502, detail="Could not generate flashcards")
 
-        print(
-            "Flashcard generation error:",
-            error
-        )
 
-        raise HTTPException(
-            status_code=502,
-            detail="Could not generate flashcards"
-        )
-        
 @app.post("/lectures/{lecture_id}/quiz")
 @app.post("/api/lectures/{lecture_id}/quiz")
 def create_quiz(
@@ -1970,14 +1350,8 @@ def create_quiz(
     db: Session = Depends(get_db)
 ):
     check_rate_limit(request)
-    lecture = get_user_lecture(lecture_id, current_user, db)
-
-    latest_note = db.query(Note).filter(
-        Note.lecture_id == lecture_id
-    ).order_by(
-        Note.version.desc(),
-        Note.id.desc()
-    ).first()
+    get_user_lecture(lecture_id, current_user, db)
+    latest_note = _get_latest_note(db, lecture_id)
 
     quiz_context = ""
     if latest_note and latest_note.content:
@@ -1989,11 +1363,8 @@ def create_quiz(
     elif latest_note and latest_note.summary:
         quiz_context = str(latest_note.summary)
 
-    # Clean fallback to transcript if notes/content are empty
     if not quiz_context.strip():
-        transcript_record = db.query(Transcript).filter(
-            Transcript.lecture_id == lecture_id
-        ).first()
+        transcript_record = db.query(Transcript).filter(Transcript.lecture_id == lecture_id).first()
         if transcript_record and transcript_record.transcript_text:
             quiz_context = str(transcript_record.transcript_text).strip()
 
@@ -2004,76 +1375,32 @@ def create_quiz(
         )
 
     try:
-        generated = generate_quiz(
-            quiz_context,
-            count=10
-        )
-
-        questions = generated.get(
-            "questions",
-            []
-        )
-
-        quiz = Quiz(
-            lecture_id=lecture_id,
-            title="Lecture Quiz"
-        )
-
+        questions = generate_quiz(quiz_context, count=10).get("questions", [])
+        quiz = Quiz(lecture_id=lecture_id, title="Lecture Quiz")
         db.add(quiz)
         db.flush()
 
         for item in questions:
-
-            options = item.get(
-                "options",
-                {}
-            )
-
-            quiz_question = QuizQuestion(
+            options = item.get("options", {})
+            db.add(QuizQuestion(
                 quiz_id=quiz.id,
-                question=item.get(
-                    "question",
-                    ""
-                ),
+                question=item.get("question", ""),
                 option_a=options.get("A", ""),
                 option_b=options.get("B", ""),
                 option_c=options.get("C", ""),
                 option_d=options.get("D", ""),
-                correct_answer=item.get(
-                    "correct_answer",
-                    ""
-                ),
-                explanation=item.get(
-                    "explanation",
-                    ""
-                )
-            )
-
-            db.add(quiz_question)
+                correct_answer=item.get("correct_answer", ""),
+                explanation=item.get("explanation", "")
+            ))
 
         db.commit()
-
-        return {
-            "quiz_id": quiz.id,
-            "lecture_id": lecture_id,
-            "title": quiz.title,
-            "questions": questions
-        }
-
+        return {"quiz_id": quiz.id, "lecture_id": lecture_id, "title": quiz.title, "questions": questions}
     except Exception:
-
         db.rollback()
+        logger.exception("Quiz generation failed for lecture %s", lecture_id)
+        raise HTTPException(status_code=502, detail="Could not generate quiz")
 
-        logger.exception(
-            "Quiz generation failed for lecture %s",
-            lecture_id
-        )
 
-        raise HTTPException(
-            status_code=502,
-            detail="Could not generate quiz"
-        )
-        
 @app.get("/lectures/{lecture_id}/quiz")
 @app.get("/api/lectures/{lecture_id}/quiz")
 def get_quiz(
@@ -2081,43 +1408,25 @@ def get_quiz(
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    lecture = get_user_lecture(lecture_id, current_user, db)
-    quiz = db.query(Quiz).filter(
-        Quiz.lecture_id == lecture_id
-    ).order_by(
-        Quiz.id.desc()
-    ).first()
-
+    get_user_lecture(lecture_id, current_user, db)
+    quiz = db.query(Quiz).filter(Quiz.lecture_id == lecture_id).order_by(Quiz.id.desc()).first()
     if not quiz:
-        raise HTTPException(
-            status_code=404,
-            detail="Quiz not found"
-        )
+        raise HTTPException(status_code=404, detail="Quiz not found")
 
-    questions = db.query(QuizQuestion).filter(
-        QuizQuestion.quiz_id == quiz.id
-    ).order_by(
-        QuizQuestion.id.asc()
-    ).all()
-
+    questions = db.query(QuizQuestion).filter(QuizQuestion.quiz_id == quiz.id).order_by(QuizQuestion.id.asc()).all()
     return {
         "quiz_id": quiz.id,
         "lecture_id": lecture_id,
         "title": quiz.title,
         "questions": [
             {
-                "id": question.id,
-                "question": question.question,
-                "options": {
-                    "A": question.option_a,
-                    "B": question.option_b,
-                    "C": question.option_c,
-                    "D": question.option_d
-                },
-                "correct_answer": question.correct_answer,
-                "explanation": question.explanation
+                "id": q.id,
+                "question": q.question,
+                "options": {"A": q.option_a, "B": q.option_b, "C": q.option_c, "D": q.option_d},
+                "correct_answer": q.correct_answer,
+                "explanation": q.explanation
             }
-            for question in questions
+            for q in questions
         ]
     }
 
