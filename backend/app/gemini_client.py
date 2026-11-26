@@ -1,5 +1,6 @@
 """Shared Google Gemini client configuration and structured JSON generation helpers."""
 
+import ast
 import json
 import os
 import re
@@ -8,7 +9,7 @@ from typing import Any
 
 from dotenv import load_dotenv
 from google import genai
-from google.genai import types
+from google.genai import errors, types
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR / ".env")
@@ -24,11 +25,53 @@ def get_gemini_api_key() -> str:
 
 
 def get_gemini_client() -> genai.Client:
-    """Create a Google GenAI SDK client using GEMINI_API_KEY."""
+    """Create a Google GenAI SDK client targeting v1beta (required for system_instruction and JSON schemas)."""
     api_key = get_gemini_api_key()
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is missing in environment.")
-    return genai.Client(api_key=api_key)
+    # Explicitly select v1beta because google-genai>=3.x defaults to v1, which rejects system_instruction.
+    return genai.Client(
+        api_key=api_key,
+        http_options=types.HttpOptions(api_version="v1beta"),
+    )
+
+
+def extract_gemini_error_message(error: Exception) -> str:
+    """Extract a clean human-readable message from Gemini APIError exceptions without raw dict reprs."""
+    visited: set[int] = set()
+    current: BaseException | None = error
+
+    while current is not None and id(current) not in visited:
+        visited.add(id(current))
+        direct_msg = getattr(current, "message", None)
+        if isinstance(direct_msg, str) and direct_msg.strip():
+            return direct_msg.strip()
+        current = current.__cause__ or current.__context__
+
+    raw = str(error).strip()
+    if not raw:
+        return "AI service request failed. Please try again."
+
+    # Strip repeated wrapper prefixes if already nested
+    for prefix in ("Gemini transcription failed:", "Note generation failed:", "Transcription failed:"):
+        if raw.startswith(prefix):
+            raw = raw[len(prefix) :].strip()
+
+    dict_match = re.search(r"(\{.*\})\s*$", raw, re.DOTALL)
+    if dict_match:
+        payload_str = dict_match.group(1)
+        for parser in (json.loads, ast.literal_eval):
+            try:
+                parsed = parser(payload_str)
+                if isinstance(parsed, dict):
+                    err_obj = parsed.get("error") if isinstance(parsed.get("error"), dict) else parsed
+                    msg = err_obj.get("message")
+                    if isinstance(msg, str) and msg.strip():
+                        return msg.strip()
+            except Exception:
+                continue
+
+    return raw
 
 
 def _strip_json_fences(raw_text: str) -> str:
@@ -74,9 +117,13 @@ def generate_gemini_json(
     if response_schema is not None:
         config_kwargs["response_schema"] = response_schema
 
-    response = client.models.generate_content(
-        model=model or os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
-        contents=contents,
-        config=types.GenerateContentConfig(**config_kwargs),
-    )
+    try:
+        response = client.models.generate_content(
+            model=model or os.getenv("GEMINI_MODEL", DEFAULT_GEMINI_MODEL),
+            contents=contents,
+            config=types.GenerateContentConfig(**config_kwargs),
+        )
+    except errors.APIError as api_err:
+        raise RuntimeError(extract_gemini_error_message(api_err)) from api_err
+
     return parse_gemini_json_response(response)

@@ -2,9 +2,13 @@
 import json
 import logging
 import os
+import shutil
+import struct
+import subprocess
 import threading
 import time
 import traceback
+import wave
 from contextlib import asynccontextmanager
 from ipaddress import ip_address
 from pathlib import Path
@@ -34,6 +38,7 @@ from app.flashcard import generate_flashcards
 from app.database import Base, engine, SessionLocal, get_db
 from app.quiz import generate_quiz
 from app.transcription import transcribe_audio
+from app.gemini_client import extract_gemini_error_message
 from app.notes_generator import answer_question, generate_notes
 from app.pipeline import process_transcript
 from app.rag import retrieve_context
@@ -84,10 +89,21 @@ def seed_demo_lectures_if_needed(db: Session, student_user: User):
         title="Introduction to Artificial Neural Networks and Backpropagation",
         status="completed",
         audio_format="Audio MP3",
-        file_size=42400000
+        file_size=42400000,
+        duration_seconds=480,
     )
     db.add(lec1)
     db.flush()
+    db.add(Transcript(
+        lecture_id=lec1.id,
+        transcript_text=(
+            "Welcome to Lecture 1 on Artificial Neural Networks and Backpropagation. "
+            "An artificial neuron calculates the weighted sum of inputs plus bias, applies a non-linear "
+            "activation such as ReLU, and updates weights iteratively via gradient descent and the chain rule."
+        ),
+        language="en",
+        duration_seconds=480,
+    ))
 
     note1_content = {
         "title": "Introduction to Artificial Neural Networks and Backpropagation",
@@ -157,10 +173,21 @@ def seed_demo_lectures_if_needed(db: Session, student_user: User):
         title="Cellular Respiration and ATP Synthesis",
         status="completed",
         audio_format="Audio MP3",
-        file_size=38200000
+        file_size=38200000,
+        duration_seconds=360,
     )
     db.add(lec2)
     db.flush()
+    db.add(Transcript(
+        lecture_id=lec2.id,
+        transcript_text=(
+            "Today we examine cellular respiration across Glycolysis in the cytoplasm, "
+            "the Citric Acid Krebs cycle in the mitochondrial matrix, and Oxidative Phosphorylation "
+            "using the electron transport chain and ATP Synthase to generate 28 to 32 ATP per glucose."
+        ),
+        language="en",
+        duration_seconds=360,
+    ))
 
     note2_content = {
         "title": "Cellular Respiration and ATP Synthesis",
@@ -226,7 +253,7 @@ def seed_demo_lectures_if_needed(db: Session, student_user: User):
 
 
 def ensure_lecture_schema_columns(target_engine):
-    """Ensure error_message and updated_at columns exist on lectures table."""
+    """Ensure error_message, updated_at, and duration_seconds columns exist on lectures table."""
     try:
         from sqlalchemy import inspect
         inspector = inspect(target_engine)
@@ -241,8 +268,35 @@ def ensure_lecture_schema_columns(target_engine):
                     conn.execute(text("ALTER TABLE lectures ADD COLUMN updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP"))
                     conn.commit()
                     logger.info("Added updated_at column to lectures table.")
+                if "duration_seconds" not in columns:
+                    conn.execute(text("ALTER TABLE lectures ADD COLUMN duration_seconds INTEGER DEFAULT 0"))
+                    conn.commit()
+                    logger.info("Added duration_seconds column to lectures table.")
     except Exception as col_err:
         logger.warning(f"Lecture schema column check notice: {col_err}")
+
+
+def backfill_missing_lecture_durations(db: Session) -> None:
+    """Backfill duration_seconds on existing lectures and transcripts that currently store 0 or NULL."""
+    try:
+        lectures = db.query(Lecture).all()
+        updated = False
+        for lec in lectures:
+            note = (
+                db.query(Note)
+                .filter(Note.lecture_id == lec.id)
+                .order_by(Note.version.desc(), Note.id.desc())
+                .first()
+            )
+            before = int(getattr(lec, "duration_seconds", None) or 0)
+            resolved = _resolve_and_sync_duration(db, lec, transcript=lec.transcript, note=note, commit=False)
+            if resolved > 0 and before <= 0:
+                updated = True
+        if updated:
+            db.commit()
+    except Exception as err:
+        db.rollback()
+        logger.warning("Lecture duration backfill notice: %s", err)
 
 
 def recover_stale_processing_lectures(db: Session, max_age_minutes: int = 2):
@@ -309,11 +363,15 @@ def _run_background_database_init():
                     db.flush()
                 try:
                     seed_demo_lectures_if_needed(db, student_user)
+                    backfill_missing_lecture_durations(db)
                     db.commit()
                     logger.info("Verified / initialized default demo accounts and starter notes.")
                 except Exception as seed_err:
                     logger.warning(f"Demo lecture seeding notice: {seed_err}")
                     db.rollback()
+        else:
+            with SessionLocal() as backfill_db:
+                backfill_missing_lecture_durations(backfill_db)
     except Exception as exc:
         logger.warning(f"Database background init notice: {exc}")
 
@@ -499,6 +557,153 @@ def _get_latest_note(db: Session, lecture_id: int) -> Optional[Note]:
     )
 
 
+def estimate_duration_seconds_from_text(text_value: str) -> int:
+    """Estimate spoken lecture duration (~130 words/min, minimum 60s when non-empty)."""
+    words = len(str(text_value or "").split())
+    if words <= 0:
+        return 0
+    return max(60, round((words / 130) * 60))
+
+
+def _extract_mp4_mvhd_duration(file_path: Path) -> int:
+    """Parse ISO BMFF/MP4 mvhd header to extract media duration in seconds when ffprobe is unavailable."""
+    try:
+        with file_path.open("rb") as fh:
+            data = fh.read(min(file_path.stat().st_size, 1024 * 1024))
+        idx = data.find(b"mvhd")
+        if idx < 4 or idx + 24 > len(data):
+            return 0
+        version = data[idx + 4]
+        if version == 0 and idx + 24 <= len(data):
+            timescale, duration = struct.unpack(">II", data[idx + 16 : idx + 24])
+            return max(1, round(duration / timescale)) if timescale > 0 and duration > 0 else 0
+        if version == 1 and idx + 36 <= len(data):
+            timescale, duration = struct.unpack(">IQ", data[idx + 24 : idx + 36])
+            return max(1, round(duration / timescale)) if timescale > 0 and duration > 0 else 0
+    except Exception:
+        pass
+    return 0
+
+
+def extract_audio_duration_seconds(file_path: Path) -> int:
+    """Extract real media duration in seconds using ffprobe, mutagen, wave, or MP4 mvhd metadata."""
+    try:
+        if not file_path or not file_path.is_file() or file_path.stat().st_size == 0:
+            return 0
+    except OSError:
+        return 0
+
+    ffprobe_bin = shutil.which("ffprobe")
+    if ffprobe_bin:
+        try:
+            proc = subprocess.run(
+                [
+                    ffprobe_bin,
+                    "-v", "error",
+                    "-show_entries", "format=duration",
+                    "-of", "default=noprint_wrappers=1:nokey=1",
+                    str(file_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=15,
+            )
+            out = (proc.stdout or "").strip()
+            if proc.returncode == 0 and out and out.lower() != "n/a":
+                seconds = float(out)
+                if seconds > 0:
+                    return max(1, round(seconds))
+        except Exception:
+            pass
+
+    try:
+        import mutagen  # type: ignore
+        media = mutagen.File(str(file_path))
+        length = getattr(getattr(media, "info", None), "length", None)
+        if length and float(length) > 0:
+            return max(1, round(float(length)))
+    except Exception:
+        pass
+
+    ext = file_path.suffix.lower()
+    if ext == ".wav":
+        try:
+            with wave.open(str(file_path), "rb") as wav_file:
+                frames = wav_file.getnframes()
+                rate = wav_file.getframerate()
+                if rate > 0 and frames > 0:
+                    return max(1, round(frames / rate))
+        except Exception:
+            pass
+    elif ext in (".mp4", ".m4a"):
+        mvhd_secs = _extract_mp4_mvhd_duration(file_path)
+        if mvhd_secs > 0:
+            return mvhd_secs
+
+    return 0
+
+
+def _note_to_plain_text(note: Optional[Note]) -> str:
+    """Flatten Note fields into plain text for fallback duration estimation."""
+    if not note:
+        return ""
+    parts = [str(note.summary or "")]
+    content = note.content
+    if isinstance(content, str):
+        parts.append(content)
+    elif isinstance(content, dict):
+        for sec in content.get("sections", []) if isinstance(content.get("sections"), list) else []:
+            if isinstance(sec, dict):
+                parts.append(str(sec.get("heading") or ""))
+                parts.append(str(sec.get("intro") or ""))
+                parts.append(str(sec.get("content") or ""))
+                for b in sec.get("bullets", []) if isinstance(sec.get("bullets"), list) else []:
+                    if isinstance(b, dict):
+                        parts.append(f"{b.get('label', '')} {b.get('detail', '')}")
+        for kp in content.get("key_points", []) if isinstance(content.get("key_points"), list) else []:
+            parts.append(str(kp))
+    return " ".join(p for p in parts if p).strip()
+
+
+def _resolve_and_sync_duration(
+    db: Session,
+    lecture: Lecture,
+    transcript: Optional[Transcript] = None,
+    note: Optional[Note] = None,
+    commit: bool = False,
+) -> int:
+    """Resolve lecture duration in seconds from media, existing DB columns, or ~130 wpm estimation."""
+    lec_dur = int(getattr(lecture, "duration_seconds", None) or 0)
+    tr_dur = int(getattr(transcript, "duration_seconds", None) or 0) if transcript else 0
+    resolved = max(lec_dur, tr_dur)
+
+    if resolved <= 0 and getattr(lecture, "audio_path", None):
+        resolved = extract_audio_duration_seconds(Path(str(lecture.audio_path)))
+
+    if resolved <= 0 and transcript and getattr(transcript, "transcript_text", None):
+        resolved = estimate_duration_seconds_from_text(str(transcript.transcript_text))
+
+    if resolved <= 0 and note is not None:
+        resolved = estimate_duration_seconds_from_text(_note_to_plain_text(note))
+
+    changed = False
+    if resolved > 0:
+        if lec_dur != resolved:
+            setattr(lecture, "duration_seconds", resolved)
+            changed = True
+        if transcript and tr_dur != resolved:
+            setattr(transcript, "duration_seconds", resolved)
+            changed = True
+
+    if commit and changed:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
+    return resolved
+
+
 def _mark_lecture_failed(lecture_id: int, error_message: str) -> None:
     """Persist failed lecture status in an isolated session after rollback."""
     try:
@@ -581,6 +786,7 @@ def _save_generated_notes(db: Session, lecture: Lecture, transcript_text: str) -
     db.add(note)
     setattr(lecture, "status", "completed")
     setattr(lecture, "error_message", None)
+    _resolve_and_sync_duration(db, lecture, transcript=lecture.transcript, note=note, commit=False)
     db.commit()
     db.refresh(note)
     return generated, note
@@ -688,12 +894,15 @@ async def upload_audio(
                 detail="File content does not match the audio format extension. Disguised files are rejected."
             )
 
+        duration_seconds = extract_audio_duration_seconds(file_path)
+
         lecture = Lecture(
             user_id=current_user.id,
             title=Path(original_name).stem,
             audio_path=str(file_path),
             audio_format=extension.lstrip("."),
             file_size=total_bytes,
+            duration_seconds=duration_seconds,
             status="uploaded"
         )
         db.add(lecture)
@@ -705,6 +914,7 @@ async def upload_audio(
             "original_filename": original_name,
             "saved_filename": saved_filename,
             "file_size_bytes": total_bytes,
+            "duration_seconds": duration_seconds,
             "status": lecture.status
         }
     except HTTPException:
@@ -757,12 +967,27 @@ def transcribe_lecture(
             raise HTTPException(status_code=422, detail="No speech detected in audio")
 
         transcript_record = db.query(Transcript).filter(Transcript.lecture_id == lecture.id).first()
+        duration_seconds = int(getattr(lecture, "duration_seconds", None) or 0)
+        if duration_seconds <= 0:
+            duration_seconds = extract_audio_duration_seconds(file_path) or estimate_duration_seconds_from_text(transcript_text)
+
         if transcript_record:
             transcript_record.transcript_text = transcript_text
             setattr(transcript_record, "language", language)
+            if duration_seconds > 0:
+                setattr(transcript_record, "duration_seconds", duration_seconds)
         else:
-            db.add(Transcript(lecture_id=lecture.id, transcript_text=transcript_text, language=language))
+            db.add(
+                Transcript(
+                    lecture_id=lecture.id,
+                    transcript_text=transcript_text,
+                    language=language,
+                    duration_seconds=duration_seconds,
+                )
+            )
 
+        if duration_seconds > 0:
+            setattr(lecture, "duration_seconds", duration_seconds)
         setattr(lecture, "status", "transcribed")
         setattr(lecture, "error_message", None)
         db.commit()
@@ -772,6 +997,7 @@ def transcribe_lecture(
             "message": "Transcription completed and saved",
             "lecture_id": lecture.id,
             "language": language,
+            "duration_seconds": duration_seconds,
             "transcript": transcript_text
         }
     except HTTPException as http_exc:
@@ -780,15 +1006,16 @@ def transcribe_lecture(
         raise
     except Exception as error:
         db.rollback()
-        _mark_lecture_failed(lecture.id, str(error))
+        clean_err = extract_gemini_error_message(error)
+        _mark_lecture_failed(lecture.id, clean_err)
         logger.error(
             "Transcription request failed for lecture_id=%s after %.2f seconds: %s\n%s",
             lecture.id,
             time.perf_counter() - request_started_at,
-            error,
+            clean_err,
             traceback.format_exc()
         )
-        raise HTTPException(status_code=500, detail=f"Transcription failed: {error}")
+        raise HTTPException(status_code=500, detail=f"Transcription failed: {clean_err}")
 
 
 @app.post("/generate-notes")
@@ -804,6 +1031,7 @@ def create_notes(
 
     try:
         notes = generate_notes(notes_request.transcript)
+        duration_seconds = estimate_duration_seconds_from_text(notes_request.transcript)
         lecture_id = None
         note_id = None
 
@@ -811,10 +1039,22 @@ def create_notes(
             try:
                 raw_title = notes.get("title", "Lecture Notes")
                 title = str(raw_title).strip()[:255] if raw_title and str(raw_title).strip() else "Pasted Lecture Notes"
-                lecture = Lecture(user_id=current_user.id, title=title, status="completed")
+                lecture = Lecture(
+                    user_id=current_user.id,
+                    title=title,
+                    status="completed",
+                    audio_format="Transcript",
+                    duration_seconds=duration_seconds,
+                )
                 db.add(lecture)
                 db.flush()
-                db.add(Transcript(lecture_id=lecture.id, transcript_text=notes_request.transcript))
+                db.add(
+                    Transcript(
+                        lecture_id=lecture.id,
+                        transcript_text=notes_request.transcript,
+                        duration_seconds=duration_seconds,
+                    )
+                )
                 note = Note(lecture_id=lecture.id, title=title, summary=notes.get("summary", ""), content=notes, version=1)
                 db.add(note)
                 db.commit()
@@ -825,12 +1065,19 @@ def create_notes(
                 db.rollback()
                 logger.warning(f"Could not persist pasted notes to database: {save_err}")
 
-        return {"message": "Notes generated successfully", "notes": notes, "lecture_id": lecture_id, "note_id": note_id}
+        return {
+            "message": "Notes generated successfully",
+            "notes": notes,
+            "lecture_id": lecture_id,
+            "note_id": note_id,
+            "duration_seconds": duration_seconds,
+        }
     except ValueError as error:
         raise HTTPException(status_code=400, detail=str(error))
     except Exception as error:
-        logger.exception("AI note generation error: %s", error)
-        raise HTTPException(status_code=502, detail="AI note generation failed. Check backend terminal.")
+        clean_err = extract_gemini_error_message(error)
+        logger.exception("AI note generation error: %s", clean_err)
+        raise HTTPException(status_code=502, detail=f"AI note generation failed: {clean_err}")
 
 
 def run_lecture_synthesis(lecture_id: int, user_id: int):
@@ -858,12 +1105,25 @@ def run_lecture_synthesis(lecture_id: int, user_id: int):
                 if not transcript_text:
                     raise ValueError("No speech detected in audio file.")
 
+                media_duration = int(getattr(lecture, "duration_seconds", None) or 0)
+                if media_duration <= 0:
+                    media_duration = extract_audio_duration_seconds(Path(lecture.audio_path)) or estimate_duration_seconds_from_text(transcript_text)
+
                 if not transcript_record:
-                    transcript_record = Transcript(lecture_id=lecture_id, transcript_text=transcript_text, language=trans_result.get("language"))
+                    transcript_record = Transcript(
+                        lecture_id=lecture_id,
+                        transcript_text=transcript_text,
+                        language=trans_result.get("language"),
+                        duration_seconds=media_duration,
+                    )
                     db.add(transcript_record)
                 else:
                     transcript_record.transcript_text = transcript_text
                     transcript_record.language = trans_result.get("language")
+                    if media_duration > 0:
+                        transcript_record.duration_seconds = media_duration
+                if media_duration > 0:
+                    setattr(lecture, "duration_seconds", media_duration)
                 db.commit()
 
             logger.info("Stage 2/3: Running structured note generation and Qdrant indexing...")
@@ -871,8 +1131,9 @@ def run_lecture_synthesis(lecture_id: int, user_id: int):
             logger.info("Successfully completed synthesis pipeline for lecture %d.", lecture_id)
         except Exception as exc:
             db.rollback()
-            logger.error("Synthesis pipeline failed for lecture %d: %s\n%s", lecture_id, exc, traceback.format_exc())
-            _mark_lecture_failed(lecture_id, str(exc))
+            clean_err = extract_gemini_error_message(exc)
+            logger.error("Synthesis pipeline failed for lecture %d: %s\n%s", lecture_id, clean_err, traceback.format_exc())
+            _mark_lecture_failed(lecture_id, clean_err)
 
 
 @app.post("/lectures/{lecture_id}/generate-notes")
@@ -907,9 +1168,10 @@ def create_and_save_notes(
         }
     except Exception as error:
         db.rollback()
-        _mark_lecture_failed(lecture_id, str(error))
-        logger.error("Note generation error for lecture_id=%d: %s\n%s", lecture_id, error, traceback.format_exc())
-        raise HTTPException(status_code=502, detail=f"Note generation failed: {error}")
+        clean_err = extract_gemini_error_message(error)
+        _mark_lecture_failed(lecture_id, clean_err)
+        logger.error("Note generation error for lecture_id=%d: %s\n%s", lecture_id, clean_err, traceback.format_exc())
+        raise HTTPException(status_code=502, detail=f"Note generation failed: {clean_err}")
 
 
 # --------------------------------------------------
@@ -987,6 +1249,7 @@ def get_lecture_notes(
 
 @app.get("/lectures")
 @app.get("/api/lectures")
+@app.get("/api/dashboard")
 def get_all_lectures(
     request: Request,
     current_user: User = Depends(get_current_user),
@@ -1016,11 +1279,12 @@ def get_all_lectures(
     total_duration_seconds = 0
     total_words = 0
     notes_ready_count = 0
+    durations_dirty = False
 
     for lecture in all_lectures:
         latest_note = db.query(Note).filter(
             Note.lecture_id == lecture.id
-        ).order_by(Note.version.desc()).first()
+        ).order_by(Note.version.desc(), Note.id.desc()).first()
 
         has_notes = latest_note is not None
         if has_notes:
@@ -1032,7 +1296,16 @@ def get_all_lectures(
         if latest_note and isinstance(latest_note.content, dict):
             sections_count = len(latest_note.content.get("sections", []))
 
-        duration = lecture.transcript.duration_seconds if (lecture.transcript and lecture.transcript.duration_seconds) else 0
+        prev_duration = int(getattr(lecture, "duration_seconds", None) or 0)
+        duration = _resolve_and_sync_duration(
+            db,
+            lecture,
+            transcript=lecture.transcript,
+            note=latest_note,
+            commit=False,
+        )
+        if duration > 0 and prev_duration <= 0:
+            durations_dirty = True
         total_duration_seconds += duration
 
         word_count = 0
@@ -1059,6 +1332,12 @@ def get_all_lectures(
             "error_message": getattr(lecture, "error_message", None)
         })
 
+    if durations_dirty:
+        try:
+            db.commit()
+        except Exception:
+            db.rollback()
+
     stats = {
         "total_lectures": len(all_lectures),
         "notes_ready": notes_ready_count,
@@ -1084,7 +1363,14 @@ def get_lecture_detail(
     db: Session = Depends(get_db)
 ):
     lecture = get_user_lecture(lecture_id, current_user, db)
-    latest_note = db.query(Note).filter(Note.lecture_id == lecture.id).first()
+    latest_note = _get_latest_note(db, lecture.id)
+    duration = _resolve_and_sync_duration(
+        db,
+        lecture,
+        transcript=lecture.transcript,
+        note=latest_note,
+        commit=True,
+    )
     effective_status = "completed" if latest_note else (lecture.status or "uploaded")
     return {
         "id": lecture.id,
@@ -1092,7 +1378,9 @@ def get_lecture_detail(
         "status": effective_status,
         "created_at": lecture.created_at,
         "audio_format": lecture.audio_format,
+        "audio_filename": Path(lecture.audio_path).name if lecture.audio_path else None,
         "file_size": lecture.file_size,
+        "duration_seconds": duration,
         "has_notes": latest_note is not None,
         "error_message": getattr(lecture, "error_message", None)
     }
@@ -1192,8 +1480,9 @@ def ask_lecture_question(
 
         result = answer_question(question=question, context=context, notes_context=note_content, history=history)
     except Exception as error:
-        logger.exception("Question generation failed for lecture %s", lecture_id)
-        raise HTTPException(status_code=502, detail="Could not generate an answer. Please try again.") from error
+        clean_err = extract_gemini_error_message(error)
+        logger.exception("Question generation failed for lecture %s: %s", lecture_id, clean_err)
+        raise HTTPException(status_code=502, detail=f"Could not generate an answer: {clean_err}") from error
 
     answer_text = result.get("answer", "")
     sources = result.get("sources", [])
@@ -1417,10 +1706,11 @@ def create_quiz(
 
         db.commit()
         return {"quiz_id": quiz.id, "lecture_id": lecture_id, "title": quiz.title, "questions": questions}
-    except Exception:
+    except Exception as error:
         db.rollback()
-        logger.exception("Quiz generation failed for lecture %s", lecture_id)
-        raise HTTPException(status_code=502, detail="Could not generate quiz")
+        clean_err = extract_gemini_error_message(error)
+        logger.exception("Quiz generation failed for lecture %s: %s", lecture_id, clean_err)
+        raise HTTPException(status_code=502, detail=f"Could not generate quiz: {clean_err}")
 
 
 @app.get("/lectures/{lecture_id}/quiz")

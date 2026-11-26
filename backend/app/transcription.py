@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from app.gemini_client import generate_gemini_json, get_gemini_client
+from app.gemini_client import extract_gemini_error_message, generate_gemini_json, get_gemini_client
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,7 @@ def transcribe_audio(file_path: str) -> dict:
 
     started_at = time.perf_counter()
     target_path = _convert_video_to_audio_if_needed(path)
+    client = None
     uploaded_file = None
 
     try:
@@ -117,15 +118,17 @@ def transcribe_audio(file_path: str) -> dict:
             response_schema=TranscriptionResponseSchema,
         )
     except Exception as exc:
+        clean_err = extract_gemini_error_message(exc)
         logger.error(
-            "Gemini audio transcription failed for %s after %.2f seconds:\n%s",
+            "Gemini audio transcription failed for %s after %.2f seconds: %s\n%s",
             file_path,
             time.perf_counter() - started_at,
+            clean_err,
             traceback.format_exc(),
         )
-        raise RuntimeError(f"Gemini transcription failed: {exc}") from exc
+        raise RuntimeError(f"Gemini transcription failed: {clean_err}") from exc
     finally:
-        if uploaded_file and getattr(uploaded_file, "name", None):
+        if client and uploaded_file and getattr(uploaded_file, "name", None):
             try:
                 client.files.delete(name=uploaded_file.name)
             except Exception:

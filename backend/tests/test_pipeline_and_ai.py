@@ -243,3 +243,24 @@ class TestPipelineAndAI(unittest.TestCase):
         res = verify_coverage_with_gemini(["Neural network gradients"], [{"notes": {"summary": "Neural network gradients overview"}}])
         self.assertTrue(res["semantic_covered"])
         self.assertEqual(res["semantic_missing_topics"], [])
+
+    def test_13_gemini_client_uses_v1beta_and_parses_api_error(self):
+        """Verify Gemini client selects v1beta (for system_instruction) and extracts clean error messages."""
+        import os
+        from google.genai import errors
+        from app.gemini_client import extract_gemini_error_message, get_gemini_client
+
+        with patch.dict(os.environ, {"GEMINI_API_KEY": "AIzaSyTestDummyKeyForUnitTestOnly123"}):
+            client = get_gemini_client()
+            self.assertEqual(client._api_client._http_options.api_version, "v1beta")
+
+        api_err = errors.APIError(
+            code=400,
+            response_json={"error": {"code": 400, "message": "System instruction unsupported on v1.", "status": "INVALID_ARGUMENT"}},
+        )
+        self.assertEqual(extract_gemini_error_message(api_err), "System instruction unsupported on v1.")
+
+        wrapped = RuntimeError(
+            "400 INVALID_ARGUMENT. {'error': {'code': 400, 'message': 'Model quota temporarily exceeded.', 'status': 'INVALID_ARGUMENT'}}"
+        )
+        self.assertEqual(extract_gemini_error_message(wrapped), "Model quota temporarily exceeded.")

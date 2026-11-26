@@ -174,6 +174,7 @@ class Lecture(Base):
     audio_path = Column(Text, nullable=True)
     audio_format = Column(String(20), nullable=True)
     file_size = Column(BigInteger, nullable=True)
+    duration_seconds = Column(Integer, nullable=True)
     status = Column(
         String(30),
         nullable=False,

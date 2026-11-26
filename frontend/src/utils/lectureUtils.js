@@ -108,14 +108,16 @@ export function isLectureProcessing(lecture) {
 }
 
 export function formatDuration(sec) {
-  if (sec === null || sec === undefined || sec === "" || isNaN(Number(sec))) return "—";
-  const totalSec = Math.max(0, Math.floor(Number(sec)));
+  if (sec === null || sec === undefined || sec === "" || isNaN(Number(sec)) || Number(sec) <= 0) {
+    return "—";
+  }
+  const totalSec = Math.floor(Number(sec));
   const h = Math.floor(totalSec / 3600);
   const m = Math.floor((totalSec % 3600) / 60);
   const s = totalSec % 60;
   return h > 0
     ? `${h}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`
-    : `${m}:${String(s).padStart(2, "0")}`;
+    : `${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
 }
 
 export function formatDate(dateStr) {

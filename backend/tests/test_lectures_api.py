@@ -189,3 +189,61 @@ class TestLecturesAPI(unittest.TestCase):
             )
         self.assertEqual(res.status_code, 413)
         self.assertIn("300 MB", res.json()["detail"])
+
+    def test_12_duration_extraction_backfill_and_dashboard_stats(self):
+        """Verify WAV/transcript duration tracking, zero-duration backfill, and /api/dashboard summation."""
+        import wave
+        from app.models import Transcript
+
+        # 1. Valid WAV header upload extracts real duration (2 seconds @ 8000Hz)
+        wav_buf = io.BytesIO()
+        with wave.open(wav_buf, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(8000)
+            wf.writeframes(b"\x00\x00" * 16000)
+        wav_buf.seek(0)
+
+        up_res = self.client.post(
+            "/upload-audio",
+            files={"file": ("short_clip.wav", wav_buf, "audio/wav")},
+            headers={"Authorization": f"Bearer {self.token_a}"}
+        )
+        self.assertEqual(up_res.status_code, 200)
+        self.assertEqual(up_res.json()["duration_seconds"], 2)
+
+        # 2. Pasted transcript estimates ~130 wpm (260 words -> 120 seconds)
+        with patch("app.main.generate_notes", return_value={
+            "title": "Operating Systems Scheduling",
+            "summary": "Overview of CPU scheduling algorithms.",
+            "sections": [{"heading": "Round Robin", "bullets": [{"label": "Quantum", "detail": "Fixed time slice."}], "content": "Fixed time slice."}],
+            "key_points": ["Fairness vs throughput"],
+            "glossary": [],
+            "revision_questions": [],
+        }):
+            gen_res = self.client.post(
+                "/generate-notes",
+                json={"transcript": " ".join(["scheduler"] * 260)},
+                headers={"Authorization": f"Bearer {self.token_a}"}
+            )
+        self.assertEqual(gen_res.status_code, 200)
+        self.assertEqual(gen_res.json()["duration_seconds"], 120)
+        pasted_lec_id = gen_res.json()["lecture_id"]
+
+        # 3. Backfill zero-duration completed lecture via /api/dashboard
+        db = TestingSessionLocal()
+        try:
+            zero_lec = db.query(Lecture).filter(Lecture.id == pasted_lec_id).first()
+            zero_lec.duration_seconds = 0
+            tr = db.query(Transcript).filter(Transcript.lecture_id == pasted_lec_id).first()
+            tr.duration_seconds = 0
+            db.commit()
+        finally:
+            db.close()
+
+        dash_res = self.client.get("/api/dashboard", headers={"Authorization": f"Bearer {self.token_a}"})
+        self.assertEqual(dash_res.status_code, 200)
+        dash_data = dash_res.json()
+        self.assertGreaterEqual(dash_data["stats"]["total_duration_seconds"], 122)
+        matched = next(l for l in dash_data["lectures"] if l["id"] == pasted_lec_id)
+        self.assertEqual(matched["duration_seconds"], 120)
