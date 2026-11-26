@@ -24,7 +24,7 @@ FROM python:3.11-slim
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     ENVIRONMENT=production \
-    PORT=8000 \
+    PORT=8080 \
     JWT_SECRET=production_default_smartnotes_secure_jwt_secret_key_2026_c2a71bf9e4
 
 WORKDIR /app
@@ -57,9 +57,9 @@ RUN sed -i 's/\r$//' /app/docker-entrypoint.sh && chmod +x /app/docker-entrypoin
 # Copy built frontend SPA assets from Stage 1 into /app/static
 COPY --from=frontend-builder /build/dist ./static
 
-# Cloud Run container port default (8000)
-EXPOSE 8000
+# Cloud Run container port default (8080)
+EXPOSE 8080
 
 ENTRYPOINT ["/app/docker-entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8080", "--workers", "1"]
 

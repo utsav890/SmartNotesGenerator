@@ -10,7 +10,7 @@ if [ -z "$JWT_SECRET" ]; then
   export JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 fi
 
-PORT="${PORT:-8000}"
+PORT="${PORT:-8080}"
 export PORT
 
 # Catch default CMD, uvicorn invocations, or shell wrappers and guarantee 0.0.0.0:$PORT binding
