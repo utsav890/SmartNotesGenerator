@@ -1703,6 +1703,8 @@ def create_quiz(
                 }
 
     latest_note = _get_latest_note(db, lecture_id)
+    transcript_record = db.query(Transcript).filter(Transcript.lecture_id == lecture_id).first()
+    transcript_text = str(transcript_record.transcript_text).strip() if transcript_record and transcript_record.transcript_text else ""
 
     quiz_context = ""
     note_payload = None
@@ -1716,9 +1718,7 @@ def create_quiz(
         quiz_context = str(latest_note.summary)
 
     if not quiz_context.strip():
-        transcript_record = db.query(Transcript).filter(Transcript.lecture_id == lecture_id).first()
-        if transcript_record and transcript_record.transcript_text:
-            quiz_context = str(transcript_record.transcript_text).strip()
+        quiz_context = transcript_text
 
     if not quiz_context.strip():
         raise HTTPException(
@@ -1727,7 +1727,12 @@ def create_quiz(
         )
 
     try:
-        quiz_result = generate_quiz(quiz_context, count=10, note_data=note_payload)
+        quiz_result = generate_quiz(
+            quiz_context,
+            count=10,
+            note_data=note_payload,
+            transcript_text=transcript_text,
+        )
         questions = quiz_result.get("questions", [])
         is_fallback = bool(quiz_result.get("fallback"))
 

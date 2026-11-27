@@ -10,7 +10,7 @@ from app.gemini_client import (
     generate_gemini_json,
     get_gemini_api_key,
     get_gemini_client,
-    is_quota_or_rate_limit_error,
+    is_model_fallback_error,
 )
 
 logger = logging.getLogger(__name__)
@@ -106,10 +106,11 @@ def _make_mcq(
 
 def build_local_fallback_quiz(
     notes_context: str,
-    count: int = 10,
+    count: int = 5,
     note_data: dict[str, Any] | None = None,
+    transcript_text: str = "",
 ) -> dict[str, Any]:
-    """Deterministically build multiple-choice practice questions from saved key_terms and chapter paragraphs."""
+    """Deterministically build multiple-choice practice questions from saved key_terms, chapters, and transcript."""
     data = _parse_note_payload(notes_context, note_data)
 
     raw_terms = data.get("key_terms") or data.get("glossary") or []
@@ -121,12 +122,12 @@ def build_local_fallback_quiz(
             if term and definition and "not clearly defined" not in definition.lower():
                 term_pairs.append((term, definition))
 
-    sections = data.get("sections") or []
+    sections = data.get("chapters") or data.get("sections") or []
     section_facts: list[tuple[str, str]] = []
     for sec in sections:
         if not isinstance(sec, dict):
             continue
-        heading = str(sec.get("heading") or "Lecture Section").strip()
+        heading = str(sec.get("heading") or sec.get("title") or "Lecture Chapter").strip()
         intro = str(sec.get("intro") or "").strip()
         if len(intro) > 25:
             section_facts.append((heading, intro))
@@ -137,7 +138,7 @@ def build_local_fallback_quiz(
                 fact = f"{label}: {detail}" if label and detail else detail
                 if len(fact) > 20:
                     section_facts.append((heading, fact))
-        content = str(sec.get("content") or "").strip()
+        content = str(sec.get("content") or sec.get("summary") or "").strip()
         if content and not sec.get("bullets"):
             for sent in re.split(r"(?<=[.!?])\s+", content):
                 if len(sent.strip()) > 25:
@@ -150,17 +151,24 @@ def build_local_fallback_quiz(
         if isinstance(r, dict) and r.get("question") and r.get("answer")
     ]
 
+    transcript_sentences = [
+        s.strip()
+        for s in re.split(r"(?<=[.!?])\s+", str(transcript_text or ""))
+        if len(s.strip()) > 25
+    ]
+
     if not term_pairs and not section_facts and not key_points:
+        fallback_source = str(data.get("summary") or transcript_text or notes_context or "")
         plain_sentences = [
             s.strip()
-            for s in re.split(r"(?<=[.!?])\s+", str(data.get("summary") or notes_context or ""))
-            if len(s.strip()) > 25
+            for s in re.split(r"(?<=[.!?])\s+", fallback_source)
+            if len(s.strip()) > 20
         ]
         section_facts = [("Lecture Overview", s) for s in plain_sentences[:count]]
 
     definition_pool = [d for _, d in term_pairs]
     term_pool = [t for t, _ in term_pairs]
-    fact_pool = [f for _, f in section_facts] + key_points + [a for _, a in revision_items]
+    fact_pool = [f for _, f in section_facts] + key_points + [a for _, a in revision_items] + transcript_sentences
 
     questions: list[dict[str, Any]] = []
     seen_questions: set[str] = set()
@@ -186,22 +194,7 @@ def build_local_fallback_quiz(
         if len(questions) >= count:
             break
 
-    # 2. Questions from saved revision questions
-    for rev_q, rev_a in revision_items:
-        if len(questions) >= count:
-            break
-        distractors = _pick_distractors(rev_a, fact_pool, definition_pool)
-        _add_question(
-            _make_mcq(
-                question=rev_q,
-                correct_text=rev_a,
-                distractors=distractors,
-                explanation=rev_a,
-                index=len(questions),
-            )
-        )
-
-    # 3. Questions from chapter paragraphs & section bullets
+    # 2. Questions from chapter/section paragraphs & bullets
     for heading, fact in section_facts:
         if len(questions) >= count:
             break
@@ -216,7 +209,37 @@ def build_local_fallback_quiz(
             )
         )
 
-    # 4. Questions from key takeaways
+    # 3. Questions from saved revision questions
+    for rev_q, rev_a in revision_items:
+        if len(questions) >= count:
+            break
+        distractors = _pick_distractors(rev_a, fact_pool, definition_pool)
+        _add_question(
+            _make_mcq(
+                question=rev_q,
+                correct_text=rev_a,
+                distractors=distractors,
+                explanation=rev_a,
+                index=len(questions),
+            )
+        )
+
+    # 4. Questions from transcript sentences
+    for idx, sent in enumerate(transcript_sentences):
+        if len(questions) >= count:
+            break
+        distractors = _pick_distractors(sent, fact_pool, definition_pool)
+        _add_question(
+            _make_mcq(
+                question=f"Which statement is directly supported by the lecture transcript (part {idx + 1})?",
+                correct_text=sent,
+                distractors=distractors,
+                explanation=f"Stated in the lecture transcript: {sent}",
+                index=len(questions),
+            )
+        )
+
+    # 5. Questions from key takeaways
     for kp in key_points:
         if len(questions) >= count:
             break
@@ -231,7 +254,7 @@ def build_local_fallback_quiz(
             )
         )
 
-    # 5. Reverse term questions if we still need more to reach `count`
+    # 6. Reverse term questions if we still need more to reach `count`
     for term, definition in term_pairs:
         if len(questions) >= count:
             break
@@ -246,6 +269,18 @@ def build_local_fallback_quiz(
             )
         )
 
+    if not questions and (notes_context.strip() or transcript_text.strip()):
+        snippet = _clean_snippet(notes_context or transcript_text, 170)
+        _add_question(
+            _make_mcq(
+                question="Which statement best summarizes the provided lecture material?",
+                correct_text=snippet,
+                distractors=_pick_distractors(snippet, [], []),
+                explanation=f"Summary from lecture material: {snippet}",
+                index=0,
+            )
+        )
+
     if not questions:
         raise ValueError("Not enough lecture content to build practice questions.")
 
@@ -257,11 +292,22 @@ def build_local_fallback_quiz(
     }
 
 
-def generate_quiz(notes_context: str, count: int = 10, note_data: dict[str, Any] | None = None) -> dict:
+def generate_quiz(
+    notes_context: str,
+    count: int = 10,
+    note_data: dict[str, Any] | None = None,
+    transcript_text: str = "",
+) -> dict:
     """Generate active-recall multiple-choice quiz questions grounded in lecture material via Gemini, with local fallback."""
+    fallback_count = min(count, 5)
     if not get_gemini_api_key():
         logger.info("GEMINI_API_KEY unset; building deterministic local quiz.")
-        return build_local_fallback_quiz(notes_context, count=count, note_data=note_data)
+        return build_local_fallback_quiz(
+            notes_context,
+            count=fallback_count,
+            note_data=note_data,
+            transcript_text=transcript_text,
+        )
 
     client = get_gemini_client()
     prompt = f"""Create exactly {count} multiple-choice questions from the lecture material below.
@@ -290,10 +336,20 @@ LECTURE MATERIAL:
             raise ValueError("No quiz questions generated")
         return {"questions": questions[:count], "fallback": False}
     except GeminiQuotaError as quota_err:
-        logger.warning("All Gemini models exhausted quota for quiz generation; using local fallback: %s", quota_err)
-        return build_local_fallback_quiz(notes_context, count=count, note_data=note_data)
+        logger.warning("All Gemini models failed (429/404) for quiz generation; using local fallback: %s", quota_err)
+        return build_local_fallback_quiz(
+            notes_context,
+            count=fallback_count,
+            note_data=note_data,
+            transcript_text=transcript_text,
+        )
     except Exception as err:
-        if is_quota_or_rate_limit_error(err):
-            logger.warning("Gemini quota error for quiz generation; using local fallback: %s", err)
-            return build_local_fallback_quiz(notes_context, count=count, note_data=note_data)
+        if is_model_fallback_error(err):
+            logger.warning("Gemini 429/404 error for quiz generation; using local fallback: %s", err)
+            return build_local_fallback_quiz(
+                notes_context,
+                count=fallback_count,
+                note_data=note_data,
+                transcript_text=transcript_text,
+            )
         raise

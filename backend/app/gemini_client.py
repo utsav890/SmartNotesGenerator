@@ -20,7 +20,7 @@ load_dotenv(BASE_DIR / ".env")
 DEFAULT_GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
 FALLBACK_GEMINI_MODELS = [
     m.strip()
-    for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-2.5-flash-lite,gemini-2.0-flash").split(",")
+    for m in os.getenv("GEMINI_FALLBACK_MODELS", "gemini-3.5-flash-lite").split(",")
     if m.strip()
 ]
 _PLACEHOLDER_KEYS = {"", "your_gemini_api_key_here", "replace_with_gemini_api_key"}
@@ -59,6 +59,20 @@ def is_quota_or_rate_limit_error(error: BaseException) -> bool:
         return True
     raw = str(error).lower()
     return "429" in raw or "resource_exhausted" in raw or "quota" in raw or "rate limit" in raw
+
+
+def is_model_fallback_error(error: BaseException) -> bool:
+    """Return True when an exception is a 429 quota error or 404 model-not-found error."""
+    if is_quota_or_rate_limit_error(error):
+        return True
+    code = getattr(error, "code", None) or getattr(error, "status_code", None)
+    if code == 404:
+        return True
+    status = str(getattr(error, "status", "") or "").upper()
+    if "NOT_FOUND" in status:
+        return True
+    raw = str(error).lower()
+    return "404" in raw or "not_found" in raw or "is not found" in raw
 
 
 def get_gemini_api_key() -> str:
@@ -190,15 +204,15 @@ def generate_gemini_json(
             return parse_gemini_json_response(response)
         except errors.APIError as api_err:
             last_error = api_err
-            if is_quota_or_rate_limit_error(api_err) and idx < len(candidate_models) - 1:
+            if is_model_fallback_error(api_err) and idx < len(candidate_models) - 1:
                 logger.warning(
-                    "Gemini model %s hit 429/quota limit; retrying with fallback model %s",
+                    "Gemini model %s failed (429/404); retrying with fallback model %s",
                     candidate_model,
                     candidate_models[idx + 1],
                 )
                 continue
             clean_msg = extract_gemini_error_message(api_err)
-            if is_quota_or_rate_limit_error(api_err):
+            if is_model_fallback_error(api_err):
                 retry_sec = extract_retry_after_seconds(str(api_err))
                 raise GeminiQuotaError(clean_msg, retry_after_seconds=retry_sec) from api_err
             raise RuntimeError(clean_msg) from api_err
