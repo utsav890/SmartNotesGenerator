@@ -689,8 +689,9 @@ function App() {
     }
   };
 
-  // Generate and open quiz
-  const generateAndOpenQuiz = async (lectureArg) => {
+  // Generate and open quiz (uses cached DB quiz unless regenerate=true)
+  const generateAndOpenQuiz = async (lectureArg, options = {}) => {
+    const regenerate = Boolean(options?.regenerate);
     const validArg =
       lectureArg && typeof lectureArg === "object" && "id" in lectureArg && lectureArg.id
         ? lectureArg
@@ -717,7 +718,10 @@ function App() {
     }
 
     try {
-      const result = await apiRequest(`/lectures/${targetLecture.id}/quiz`, { method: "POST" });
+      const endpoint = regenerate
+        ? `/lectures/${targetLecture.id}/quiz?regenerate=true`
+        : `/lectures/${targetLecture.id}/quiz`;
+      const result = await apiRequest(endpoint, { method: "POST" });
       if (!result || typeof result !== "object") {
         throw new Error("The quiz response was invalid. Try generating a new quiz.");
       }

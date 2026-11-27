@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import {
   ArrowLeft,
   Brain,
@@ -7,10 +8,11 @@ import {
   CircleX,
   ChevronLeft,
   ChevronRight,
-  Sparkles
+  Sparkles,
+  AlertTriangle
 } from "lucide-react";
 import LectureSelector from "../shared/LectureSelector";
-import { isLectureReady } from "../../utils/lectureUtils";
+import { isLectureReady, parseQuizError } from "../../utils/lectureUtils";
 
 export default function QuizView({
   quiz,
@@ -35,6 +37,20 @@ export default function QuizView({
   resetWorkspace,
 }) {
   const currentQuizAnswer = quizAnswers[quizQuestionIndex];
+  const parsedError = quizError ? parseQuizError(quizError) : null;
+  const [retryCountdown, setRetryCountdown] = useState(0);
+
+  useEffect(() => {
+    setRetryCountdown(parsedError?.retrySeconds || 0);
+  }, [quizError]);
+
+  useEffect(() => {
+    if (retryCountdown <= 0) return;
+    const timer = setInterval(() => {
+      setRetryCountdown((prev) => (prev > 1 ? prev - 1 : 0));
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [retryCountdown]);
 
   if (!quizLoading && !quiz && !quizError) {
     const goDashboard = () => {
@@ -87,13 +103,33 @@ export default function QuizView({
           <p className="quiz-subtitle">{readerTitle}</p>
         </div>
         {quiz && (
-          <span className="quiz-count">
-            <Brain size={18} aria-hidden="true" />
-            {quizQuestions.length}{" "}
-            {quizQuestions.length === 1 ? "Question" : "Questions"}
-          </span>
+          <div className="quiz-header-actions">
+            <span className="quiz-count">
+              <Brain size={18} aria-hidden="true" />
+              {quizQuestions.length}{" "}
+              {quizQuestions.length === 1 ? "Question" : "Questions"}
+            </span>
+            {!quizLoading && (
+              <button
+                type="button"
+                className="secondary-btn quiz-regenerate-btn"
+                onClick={() => generateAndOpenQuiz(undefined, { regenerate: true })}
+                disabled={quizLoading}
+              >
+                <RotateCcw size={15} aria-hidden="true" />
+                Regenerate New Questions
+              </button>
+            )}
+          </div>
         )}
       </header>
+
+      {!quizLoading && quiz && !quizError && (quiz.fallback || quiz.notice) && (
+        <div className="quiz-banner is-notice" role="status">
+          <AlertTriangle size={18} aria-hidden="true" />
+          <span>{quiz.notice || "Daily AI quota reached — showing offline practice questions."}</span>
+        </div>
+      )}
 
       {quizLoading && (
         <div className="library-state" role="status">
@@ -112,17 +148,25 @@ export default function QuizView({
       )}
 
       {!quizLoading && quizError && (
-        <div className="library-state error-state" role="alert">
-          <h2>Couldn’t prepare the quiz</h2>
-          <p>{quizError}</p>
+        <div className="quiz-banner is-error" role="alert">
+          <div className="quiz-banner-body">
+            <AlertTriangle size={20} aria-hidden="true" />
+            <div>
+              <h2>Couldn’t prepare the quiz</h2>
+              <p>
+                {parsedError?.message}
+                {retryCountdown > 0 ? ` Retry available in ${retryCountdown}s.` : ""}
+              </p>
+            </div>
+          </div>
           <button
             type="button"
             className="secondary-btn"
-            onClick={() => generateAndOpenQuiz()}
-            disabled={quizLoading}
+            onClick={() => generateAndOpenQuiz(undefined, { regenerate: true })}
+            disabled={quizLoading || retryCountdown > 0}
           >
             <RotateCcw size={16} aria-hidden="true" />
-            Try Again
+            {retryCountdown > 0 ? `Retry in ${retryCountdown}s` : "Try Again"}
           </button>
         </div>
       )}
@@ -222,11 +266,11 @@ export default function QuizView({
               <button
                 type="button"
                 className="generate-btn compact-btn"
-                onClick={generateAndOpenQuiz}
+                onClick={() => generateAndOpenQuiz(undefined, { regenerate: true })}
                 disabled={quizLoading}
               >
                 <RotateCcw size={16} aria-hidden="true" />
-                Try a Fresh Quiz
+                Regenerate New Questions
               </button>
             </div>
           </div>

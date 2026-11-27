@@ -189,6 +189,48 @@ export function buildNotesExportText(notes, { markdown = false } = {}) {
   ].join("\n");
 }
 
+export function parseQuizError(rawMessage) {
+  const raw = String(rawMessage || "").trim();
+  if (!raw) {
+    return { message: "Couldn’t prepare the quiz right now. Please try again.", retrySeconds: 0 };
+  }
+
+  const retryMatch = raw.match(/(?:retry in|retryDelay['":\s]+)(\d+(?:\.\d+)?)\s*s/i);
+  const retrySeconds = retryMatch ? Math.max(1, Math.round(Number(retryMatch[1]))) : 0;
+
+  if (/429|resource_exhausted|quota|rate limit/i.test(raw)) {
+    return {
+      message: retrySeconds
+        ? `AI rate limit reached — please retry in ${retrySeconds}s.`
+        : "Daily AI quota reached — please try again later.",
+      retrySeconds,
+    };
+  }
+
+  if (/failed to fetch|networkerror|load failed/i.test(raw)) {
+    return {
+      message: "Unable to reach the server. Check your connection and try again.",
+      retrySeconds: 0,
+    };
+  }
+
+  let cleaned = raw
+    .replace(/^Could not generate quiz:\s*/i, "")
+    .replace(/https?:\/\/\S+/g, "")
+    .replace(/\*?\s*Quota exceeded for metric:[^.\n]*\.?/gi, "")
+    .replace(/\{[\s\S]*\}$/g, "")
+    .replace(/\s{2,}/g, " ")
+    .trim();
+
+  if (!cleaned) {
+    cleaned = "AI quiz service is temporarily unavailable. Please try again.";
+  } else if (cleaned.length > 160) {
+    cleaned = `${cleaned.slice(0, 157).trim()}…`;
+  }
+
+  return { message: cleaned, retrySeconds };
+}
+
 export async function apiRequest(url, options = {}) {
   const { skipAuthRedirect = false, ...fetchOptions } = options;
   const rawToken = localStorage.getItem("smartnotes_token");

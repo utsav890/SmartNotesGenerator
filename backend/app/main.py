@@ -1657,20 +1657,61 @@ def create_flashcards(
 def create_quiz(
     lecture_id: int,
     request: Request,
+    regenerate: bool = False,
     current_user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     check_rate_limit(request)
     get_user_lecture(lecture_id, current_user, db)
+
+    if not regenerate:
+        existing_quiz = (
+            db.query(Quiz)
+            .filter(Quiz.lecture_id == lecture_id)
+            .order_by(Quiz.id.desc())
+            .first()
+        )
+        if existing_quiz:
+            existing_questions = (
+                db.query(QuizQuestion)
+                .filter(QuizQuestion.quiz_id == existing_quiz.id)
+                .order_by(QuizQuestion.id.asc())
+                .all()
+            )
+            if existing_questions:
+                return {
+                    "quiz_id": existing_quiz.id,
+                    "lecture_id": lecture_id,
+                    "title": existing_quiz.title,
+                    "cached": True,
+                    "fallback": False,
+                    "questions": [
+                        {
+                            "id": q.id,
+                            "question": q.question,
+                            "options": {
+                                "A": q.option_a,
+                                "B": q.option_b,
+                                "C": q.option_c,
+                                "D": q.option_d,
+                            },
+                            "correct_answer": q.correct_answer,
+                            "explanation": q.explanation,
+                        }
+                        for q in existing_questions
+                    ],
+                }
+
     latest_note = _get_latest_note(db, lecture_id)
 
     quiz_context = ""
+    note_payload = None
     if latest_note and latest_note.content:
-        quiz_context = (
-            latest_note.content
-            if isinstance(latest_note.content, str)
-            else json.dumps(latest_note.content, ensure_ascii=False)
-        )
+        if isinstance(latest_note.content, dict):
+            note_payload = latest_note.content
+            quiz_context = json.dumps(latest_note.content, ensure_ascii=False)
+        else:
+            quiz_context = str(latest_note.content)
     elif latest_note and latest_note.summary:
         quiz_context = str(latest_note.summary)
 
@@ -1686,7 +1727,22 @@ def create_quiz(
         )
 
     try:
-        questions = generate_quiz(quiz_context, count=10).get("questions", [])
+        quiz_result = generate_quiz(quiz_context, count=10, note_data=note_payload)
+        questions = quiz_result.get("questions", [])
+        is_fallback = bool(quiz_result.get("fallback"))
+
+        if is_fallback:
+            # Return offline practice questions without overwriting/polluting cached AI quizzes in DB
+            return {
+                "quiz_id": None,
+                "lecture_id": lecture_id,
+                "title": "Lecture Quiz",
+                "cached": False,
+                "fallback": True,
+                "notice": quiz_result.get("notice") or "Daily AI quota reached — showing offline practice questions.",
+                "questions": questions,
+            }
+
         quiz = Quiz(lecture_id=lecture_id, title="Lecture Quiz")
         db.add(quiz)
         db.flush()
@@ -1705,7 +1761,14 @@ def create_quiz(
             ))
 
         db.commit()
-        return {"quiz_id": quiz.id, "lecture_id": lecture_id, "title": quiz.title, "questions": questions}
+        return {
+            "quiz_id": quiz.id,
+            "lecture_id": lecture_id,
+            "title": quiz.title,
+            "cached": False,
+            "fallback": False,
+            "questions": questions,
+        }
     except Exception as error:
         db.rollback()
         clean_err = extract_gemini_error_message(error)
